@@ -1775,7 +1775,33 @@ Conversation behavior:
     // max_response_length value; that setting previously caused replies
     // to end in the middle of a word and made the remaining AI response
     // disappear. Keep the complete generated answer.
-    const finalReply = aiResponse.content.trim();
+    let finalReply = aiResponse.content.trim();
+
+    /*
+    |--------------------------------------------------------------------------
+    | 19a. Hard capability guard for AgentHub voice questions
+    |--------------------------------------------------------------------------
+    |
+    | Voice support is implemented by the connected WhatsApp service. Do not
+    | allow an AI hallucination to tell a customer that this shipped feature is
+    | unavailable.
+    |
+    */
+    const normalizedCustomerMessage = String(message || '').toLowerCase();
+    const asksAboutVoiceFeature =
+      /\b(voice|audio|voice note|voice reply|voice message|text and voice|text voice)\b/i.test(normalizedCustomerMessage) &&
+      /\b(support|available|feature|reply|replies|message|messages|kar|karta|hota|hai|hain|can|does|do)\b/i.test(normalizedCustomerMessage);
+
+    const replyDeniesVoiceFeature =
+      /\b(not available|unavailable|don't have|do not have|doesn't have|not support|doesn't support|cannot support|no voice|feature.*not)\b/i.test(finalReply);
+
+    if (asksAboutVoiceFeature && replyDeniesVoiceFeature) {
+      finalReply =
+        /\b(aap|ap|kya|hai|hain|kar|karta|roman|urdu)\b/i.test(message)
+          ? 'Ji haan, AgentHub WhatsApp AI mein voice replies available hain. Dashboard se aap Text only, Voice only, Text and Voice, ya Random reply mode select kar sakte hain.'
+          : 'Yes, AgentHub WhatsApp AI supports voice replies. From the dashboard you can choose Text only, Voice only, Text and Voice, or Random reply mode.';
+      console.warn('[WhatsApp API] Replaced incorrect voice-feature denial with authoritative capability response');
+    }
 
     /*
     |--------------------------------------------------------------------------
@@ -1803,15 +1829,32 @@ Conversation behavior:
                 content: finalReply,
               },
             ],
-            systemPrompt: `Convert the following WhatsApp reply from Roman Urdu into natural Pakistani Urdu script for text-to-speech.
+            systemPrompt: `Rewrite the following WhatsApp reply as a highly natural SPOKEN Pakistani Urdu script for text-to-speech.
 
 STRICT RULES:
-- Preserve exactly the same meaning and information.
-- Do not add, remove, invent, summarize, or change any business facts.
-- Output ONLY the Urdu-script version.
-- Use natural spoken Pakistani Urdu, not literal word-by-word translation.
-- Keep common product/brand names such as WhatsApp, AI, AgentHub, URLs and phone numbers unchanged when appropriate.
-- This output will be spoken by a female Pakistani Urdu neural voice.`,
+- Preserve exactly the same meaning and business facts.
+- Do not add, remove, invent, summarize, or change information.
+- Output ONLY the final Urdu-script speech text. No explanation.
+- Write for a Pakistani female voice speaking naturally in a WhatsApp conversation.
+- Use short natural sentences and natural punctuation: commas for small pauses and full stops for complete pauses.
+- Avoid overly formal or literary Urdu.
+- Do NOT translate common technology and brand terms literally. Write them phonetically in Urdu when that improves pronunciation.
+- Examples of spoken phonetic forms when appropriate:
+  WhatsApp → واٹس ایپ
+  AgentHub → ایجنٹ ہب
+  AI → اے آئی
+  dashboard → ڈیش بورڈ
+  voice reply → وائس رِپلائی
+  voice note → وائس نوٹ
+  text → ٹیکسٹ
+  plan → پلان
+  price → پرائس
+  feature → فیچر
+  QR code → کیو آر کوڈ
+- Keep URLs, phone numbers, prices and codes unchanged unless pronunciation would clearly improve by spacing them naturally.
+- Never use Roman Urdu or English words inside normal sentences when an Urdu phonetic form would sound better.
+- This is speech, not a written translation. Make it sound conversational and smooth.
+- The output will be spoken by a Pakistani female neural voice, so optimize pronunciation and rhythm.`,
             temperature: 0.2,
             maxTokens: 1024,
             businessId,
