@@ -254,6 +254,13 @@ export async function POST(req: NextRequest) {
           customer = newCustomer;
         }
 
+        if (!customer) {
+          console.error(
+            '[Messenger] Customer record unexpectedly missing after lookup/creation - skipping this message.'
+          );
+          continue;
+        }
+
         /*
         --------------------------------------------------------------------
         Conversation lookup / creation
