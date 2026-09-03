@@ -46,7 +46,7 @@ export default function Home() {
 
     const script = document.createElement('script');
     script.id = scriptId;
-    script.src = 'https://agenthubai.vercel.app/widget-js?business=11f62525-3c27-474d-854e-e474c7211d43';
+    script.src = `${window.location.origin}/widget-js?business=11f62525-3c27-474d-854e-e474c7211d43`;
     script.async = true;
     document.body.appendChild(script);
 
