@@ -190,7 +190,14 @@ export async function POST(req: NextRequest) {
           .eq('business_id', business_id)
           .eq('status', 'active')
           .order('created_at', { ascending: false })
-          .limit(20);
+          .limit(50);
+        // AgentHub's public plans live in subscription_plans, not products.
+        // Load the live plans so pricing questions use the same source as the website.
+        const { data: subscriptionPlans } = await supabase
+          .from('subscription_plans')
+          .select('name, description, price_cents, yearly_price_cents, currency, billing_period, features, is_active, sort_order')
+          .eq('is_active', true)
+          .order('sort_order', { ascending: true });
 
         // Load products for business context
         const { data: products } = await supabase
@@ -217,6 +224,30 @@ export async function POST(req: NextRequest) {
           systemPrompt += `\n\nProducts/Services:\n${productText}`;
         }
 
+        if (subscriptionPlans && subscriptionPlans.length > 0) {
+          const planText = subscriptionPlans
+            .map((plan) => {
+              const currentPrice = typeof plan.price_cents === 'number'
+                ? `${(plan.price_cents / 100).toFixed(2)} ${plan.currency || ''}`
+                : 'Not provided';
+              const yearlyPrice = typeof plan.yearly_price_cents === 'number'
+                ? `${(plan.yearly_price_cents / 100).toFixed(2)} ${plan.currency || ''}`
+                : 'Not provided';
+              const features = Array.isArray(plan.features) && plan.features.length
+                ? plan.features.join(', ')
+                : 'No feature list provided';
+              return `Plan: ${plan.name}\nDescription: ${plan.description || 'Not provided'}\nExact ${plan.billing_period || 'monthly'} Price: ${currentPrice}\nExact Yearly Price: ${yearlyPrice}\nFeatures: ${features}`;
+            })
+            .join('\n\n');
+          systemPrompt += `\n\nLIVE SUBSCRIPTION PLANS AND PRICING:\n${planText}`;
+        }
+
+        systemPrompt += `\n\nPRICING RULES:
+- When the customer asks for a price, pricing, cost, plans, package, subscription, quotation, or product rate, first use the exact prices in Products/Services or LIVE SUBSCRIPTION PLANS above.
+- If an exact price is present in the context, state it clearly and directly. Do NOT tell the customer to contact sales for information that is already present.
+- Never invent or guess a price.
+- Only say that pricing is unavailable when the requested item genuinely has no price in the provided context.
+- For AgentHub plan questions, use LIVE SUBSCRIPTION PLANS as the source of truth.`;
         if (settings?.custom_instructions) {
           systemPrompt += ` ${settings.custom_instructions}`;
         }
