@@ -7,7 +7,7 @@ import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { MessageSquare, Zap, Shield, Bot, Calendar, Users, ArrowRight, Check } from 'lucide-react';
+import { MessageSquare, Zap, Shield, Bot, ArrowRight, Check, Phone, MessageCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import type { SubscriptionPlan } from '@/lib/types/database';
 
@@ -74,7 +74,7 @@ export default function Home() {
           Connect WhatsApp and other channels. Deploy AI agents that answer questions, capture leads,
           book appointments, and create follow-ups — all organized in one dashboard.
         </p>
-        <div className="mt-8 flex items-center justify-center gap-4">
+        <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
           <Link href="/login">
             <Button size="lg" className="gap-2">
               Get Started <ArrowRight className="w-4 h-4" />
@@ -83,7 +83,16 @@ export default function Home() {
           <Link href="#pricing">
             <Button size="lg" variant="outline">View Plans</Button>
           </Link>
+          <a href="https://wa.me/923407465567" target="_blank" rel="noreferrer">
+            <Button size="lg" variant="outline" className="gap-2">
+              <MessageCircle className="w-4 h-4" />
+              WhatsApp Us
+            </Button>
+          </a>
         </div>
+        <p className="mt-4 text-sm text-muted-foreground">
+          Questions before choosing a plan? Contact us on WhatsApp: <a href="https://wa.me/923407465567" target="_blank" rel="noreferrer" className="font-semibold text-primary hover:underline">+92 340 7465567</a>
+        </p>
       </section>
 
       {/* Features */}
@@ -132,9 +141,17 @@ export default function Home() {
       {/* Pricing */}
       <section id="pricing" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <h2 className="text-3xl font-bold text-center mb-4">Simple, transparent pricing</h2>
-        <p className="text-center text-muted-foreground mb-12 max-w-xl mx-auto">
-          Choose the plan that fits your business. Contact us to get started — we&apos;ll set up your workspace and assign your plan.
+        <p className="text-center text-muted-foreground mb-5 max-w-xl mx-auto">
+          Choose the plan that fits your business. Contact us to get started — we&apos;ll help you choose the right plan and get your workspace set up.
         </p>
+        <div className="flex justify-center mb-12">
+          <a href="https://wa.me/923407465567" target="_blank" rel="noreferrer">
+            <Button variant="outline" className="gap-2">
+              <Phone className="w-4 h-4" />
+              Contact us: +92 340 7465567
+            </Button>
+          </a>
+        </div>
         {plans.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
             {plans.map((plan, idx) => {
@@ -167,17 +184,50 @@ export default function Home() {
                         </li>
                       ))}
                     </ul>
-                    <Link href="/login" className="block">
-                      <Button className="w-full" variant={isPopular ? 'default' : 'outline'}>
-                        Get Started
-                      </Button>
-                    </Link>
+                    <div className="space-y-2">
+                      <Link href="/login" className="block">
+                        <Button className="w-full" variant={isPopular ? 'default' : 'outline'}>
+                          Get Started
+                        </Button>
+                      </Link>
+                      <a href="https://wa.me/923407465567" target="_blank" rel="noreferrer" className="block">
+                        <Button className="w-full gap-2" variant="ghost">
+                          <MessageCircle className="w-4 h-4" />
+                          Ask about this plan
+                        </Button>
+                      </a>
+                    </div>
                   </CardContent>
                 </Card>
               );
             })}
           </div>
         )}
+      </section>
+
+      {/* Contact */}
+      <section id="contact" className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+        <div className="rounded-2xl border border-border bg-card p-8 sm:p-12 text-center shadow-sm">
+          <Badge variant="secondary" className="mb-4">Contact Us</Badge>
+          <h2 className="text-3xl font-bold mb-4">Need help choosing the right plan?</h2>
+          <p className="text-muted-foreground max-w-2xl mx-auto mb-8">
+            Talk directly with our team on WhatsApp for pricing, setup assistance, demos, and questions about AgentHub AI.
+          </p>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+            <a href="https://wa.me/923407465567" target="_blank" rel="noreferrer">
+              <Button size="lg" className="gap-2">
+                <MessageCircle className="w-5 h-5" />
+                Chat on WhatsApp
+              </Button>
+            </a>
+            <a href="tel:+923407465567">
+              <Button size="lg" variant="outline" className="gap-2">
+                <Phone className="w-5 h-5" />
+                +92 340 7465567
+              </Button>
+            </a>
+          </div>
+        </div>
       </section>
 
       {/* CTA */}
@@ -187,11 +237,19 @@ export default function Home() {
           <p className="text-primary-foreground/80 mb-8 max-w-xl mx-auto">
             Sign in to access your dashboard, set up your AI agent, and start turning conversations into business actions.
           </p>
-          <Link href="/login">
-            <Button size="lg" variant="secondary" className="gap-2">
-              Sign In <ArrowRight className="w-4 h-4" />
-            </Button>
-          </Link>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+            <Link href="/login">
+              <Button size="lg" variant="secondary" className="gap-2">
+                Sign In <ArrowRight className="w-4 h-4" />
+              </Button>
+            </Link>
+            <a href="https://wa.me/923407465567" target="_blank" rel="noreferrer">
+              <Button size="lg" variant="outline" className="gap-2 border-primary-foreground/30 bg-transparent text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground">
+                <MessageCircle className="w-4 h-4" />
+                Contact Us
+              </Button>
+            </a>
+          </div>
         </div>
       </section>
 
@@ -202,7 +260,10 @@ export default function Home() {
             <Bot className="w-4 h-4" />
             <span>AgentHub</span>
           </div>
-          <p className="text-sm text-muted-foreground">Turn Conversations Into Business Actions</p>
+          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+            <a href="https://wa.me/923407465567" target="_blank" rel="noreferrer" className="hover:text-foreground transition-colors">WhatsApp: +92 340 7465567</a>
+            <span className="hidden sm:inline">Turn Conversations Into Business Actions</span>
+          </div>
         </div>
       </footer>
     </div>
