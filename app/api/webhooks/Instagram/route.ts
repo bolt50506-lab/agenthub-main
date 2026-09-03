@@ -243,6 +243,13 @@ export async function POST(req: NextRequest) {
           customer = newCustomer;
         }
 
+        if (!customer) {
+          console.error(
+            '[Instagram] Customer record unexpectedly missing after lookup/creation - skipping this message.'
+          );
+          continue;
+        }
+
         /*
         --------------------------------------------------------------------
         Conversation lookup / creation
@@ -296,6 +303,13 @@ export async function POST(req: NextRequest) {
             .from('conversations')
             .update({ last_message_at: new Date().toISOString() })
             .eq('id', conversation.id);
+        }
+
+        if (!conversation) {
+          console.error(
+            '[Instagram] Conversation record unexpectedly missing after lookup/creation - skipping this message.'
+          );
+          continue;
         }
 
         /*
