@@ -1610,6 +1610,36 @@ LIVE SUBSCRIPTION PLANS AND PRICING:
 
 ${subscriptionPlansContext}
 
+AGENTHUB PLATFORM CAPABILITIES (AUTHORITATIVE FOR AGENTHUB PRODUCT QUESTIONS):
+
+If the customer is asking about AgentHub AI / the AgentHub platform itself, these capabilities are available:
+- AI website chat widget
+- WhatsApp AI agent
+- WhatsApp QR-code connection
+- WhatsApp Cloud API connection
+- Text replies
+- Voice replies
+- Dashboard-selectable reply rules: text only, voice only, text and voice, or random text/voice
+- Roman Urdu support
+- Urdu-script voice transcript generation for better Urdu pronunciation
+- Knowledge base
+- Products and pricing
+- Lead management
+- Conversation management
+- Follow-ups
+- Appointment handling
+- Multiple AI provider configuration and fallback
+- Gemini, Groq and Ollama provider support when configured
+- WhatsApp group reply rules
+- Dashboard-based integration and agent management
+
+CRITICAL CAPABILITY RULE:
+- Do NOT say that AgentHub does not support voice replies, voice messages, text-and-voice replies, Roman Urdu, or dashboard reply-mode selection.
+- These features are available.
+- If a customer asks whether AgentHub supports one of the listed capabilities, answer directly that it is supported and explain how it works in simple customer-facing language.
+- Never contradict this authoritative capability list because the feature was not mentioned in a generic knowledge-base entry.
+- Only say a feature is unavailable when it is explicitly outside this capability list and not present in the business knowledge.
+
 IMPORTANT RULES:
 
 - You are communicating directly with a customer of ${business.name}.
