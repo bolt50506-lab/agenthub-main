@@ -1709,10 +1709,12 @@ Conversation behavior:
     |--------------------------------------------------------------------------
     */
 
-    const finalReply = limitText(
-      aiResponse.content.trim(),
-      agentSettings?.max_response_length
-    );
+    // WhatsApp supports messages far longer than a normal AI response.
+    // Do not silently cut private replies at the agent dashboard's
+    // max_response_length value; that setting previously caused replies
+    // to end in the middle of a word and made the remaining AI response
+    // disappear. Keep the complete generated answer.
+    const finalReply = aiResponse.content.trim();
 
     /*
     |--------------------------------------------------------------------------
