@@ -120,7 +120,7 @@ const CHANNEL_META: Record<IntegrationType, ChannelMeta> = {
 
 const STATUS_CONFIG: Record<IntegrationStatus, { label: string; color: string; icon: React.ElementType }> = {
   not_connected: { label: 'Not Connected', color: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400', icon: XCircle },
-  configuration_required: { label: 'Configuration Required', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400', icon: AlertCircle },
+  configuration_required: { label: 'Configured', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400', icon: CheckCircle2 },
   configured: { label: 'Configured', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400', icon: CheckCircle2 },
   connecting: { label: 'Connecting...', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400', icon: Loader2 },
   connected: { label: 'Connected', color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400', icon: CheckCircle2 },
@@ -214,7 +214,7 @@ export default function IntegrationsPage() {
       }
     }
 
-    const newStatus: IntegrationStatus = 'configured';
+    // The production database currently allows configuration_required but not configured.\n    // A saved config is still considered ready to connect by the UI below.\n    const newStatus: IntegrationStatus = 'configuration_required';
 
     if (existing) {
       const { error } = await supabase
@@ -286,7 +286,7 @@ export default function IntegrationsPage() {
       return;
     }
 
-    if (integration.status !== 'configured' && integration.status !== 'connected') {
+    if (integration.status !== 'configured' && integration.status !== 'configuration_required' && integration.status !== 'connected') {
       toast({ title: 'Test required', description: 'Please test the connection before connecting.', variant: 'destructive' });
       return;
     }
@@ -709,7 +709,7 @@ export default function IntegrationsPage() {
           const isConfigured = integration && Object.keys(integration.config ?? {}).length > 0;
           const isConnected = status === 'connected';
           const isPaused = status === 'paused';
-          const isConfiguredStatus = status === 'configured';
+          const isConfiguredStatus = status === 'configured' || status === 'configuration_required';
           const isError = status === 'error';
           const canConnect = isConfiguredStatus || isConnected;
 
