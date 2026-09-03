@@ -169,7 +169,9 @@ export async function POST(req: NextRequest) {
       const { data: providerRows } = await supabase
         .from('ai_provider_configs')
         .select('provider, model, base_url, is_enabled, api_key_encrypted, priority')
-        .eq('business_id', business_id)
+        // AI providers are global super-admin configurations, not business-scoped.
+        // The schema has no business_id column, so filtering by business_id made
+        // every widget request skip the AI layer and fall back to the canned reply.
         .eq('is_enabled', true)
         .order('priority', { ascending: true });
 
