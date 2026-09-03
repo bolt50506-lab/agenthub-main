@@ -436,6 +436,20 @@ export default function IntegrationsPage() {
 
     console.log('QR poll response:', data);
 
+    if (res.status === 404) {
+      // The row was removed/replaced while an old interval was still polling.
+      // Stop immediately instead of treating this as a missing API route.
+      stopQrPolling();
+      setWhatsappSessionId(null);
+      setWhatsappQrCode(null);
+      setWhatsappPhone(null);
+      setWhatsappQrStatus('not_started');
+      setWhatsappQrError(
+        data.error_message ?? 'WhatsApp session expired. Please start a new QR connection.'
+      );
+      return;
+    }
+
     setWhatsappQrStatus(data.status);
 
     // UPDATE QR CODE WHEN SERVICE RETURNS ONE
@@ -559,10 +573,16 @@ export default function IntegrationsPage() {
 
   const handleWhatsappQrConnect = async () => {
     if (!activeBusiness) return;
+
+    // Stop any old interval before the backend resets the Baileys session.
+    stopQrPolling();
+    setWhatsappSessionId(null);
+    setWhatsappQrCode(null);
+    setWhatsappPhone(null);
+    setWhatsappQrError(null);
+
     setActionLoading('qr-connect');
     setWhatsappQrStatus('creating_session');
-    setWhatsappQrCode(null);
-    setWhatsappQrError(null);
 
     try {
       const res = await fetch('/api/whatsapp/qr/start', {
@@ -587,14 +607,20 @@ export default function IntegrationsPage() {
         return;
       }
 
+      if (!data.session_id) {
+        throw new Error('QR service started without returning a session ID.');
+      }
+
       setWhatsappSessionId(data.session_id);
-      setWhatsappQrCode(data.qr_code);
+      setWhatsappQrCode(data.qr_code || null);
       setWhatsappQrStatus(data.status);
       setActionLoading(null);
 
+      // Poll the newly returned stable Supabase row ID.
       stopQrPolling();
+      await pollQrStatus(data.session_id);
       qrPollRef.current = setInterval(() => {
-        if (data.session_id) pollQrStatus(data.session_id);
+        pollQrStatus(data.session_id);
       }, 3000);
     } catch (err) {
       setWhatsappQrStatus('error');
