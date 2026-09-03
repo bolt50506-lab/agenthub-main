@@ -235,6 +235,29 @@ export async function POST(req: NextRequest) {
 
     const businessId = whatsappSession.business_id;
 
+    // Reply delivery rule is stored in the WhatsApp integration config so
+    // each business can control text/voice behavior independently.
+    let voiceReplyMode: 'text_only' | 'voice_only' | 'text_and_voice' | 'random' = 'text_and_voice';
+
+    if (whatsappSession.integration_id) {
+      const { data: whatsappIntegration } = await supabase
+        .from('integrations')
+        .select('config')
+        .eq('id', whatsappSession.integration_id)
+        .maybeSingle();
+
+      const configuredMode = (whatsappIntegration?.config as Record<string, unknown> | null)?.voice_reply_mode;
+
+      if (
+        configuredMode === 'text_only' ||
+        configuredMode === 'voice_only' ||
+        configuredMode === 'text_and_voice' ||
+        configuredMode === 'random'
+      ) {
+        voiceReplyMode = configuredMode;
+      }
+    }
+
     if (!businessId) {
       console.error(
         '[WhatsApp API] WhatsApp session has no business_id:',
@@ -1962,6 +1985,7 @@ STRICT RULES:
       success: true,
       reply: finalReply,
       voice_reply: voiceReply,
+      voice_reply_mode: voiceReplyMode,
       provider: aiResponse.provider,
       model: aiResponse.model,
       appointment_id: bookedAppointmentId,
