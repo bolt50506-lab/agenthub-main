@@ -316,6 +316,13 @@ export async function POST(req: NextRequest) {
             .eq('id', conversation.id);
         }
 
+        if (!conversation) {
+          console.error(
+            '[Messenger] Conversation record unexpectedly missing after lookup/creation - skipping this message.'
+          );
+          continue;
+        }
+
         /*
         --------------------------------------------------------------------
         Store incoming message
