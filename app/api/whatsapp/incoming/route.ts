@@ -596,10 +596,15 @@ export async function POST(req: NextRequest) {
           business_id,
           category_id,
           name,
-          description
+          description,
+          price,
+          currency,
+          availability,
+          status
         `
       )
       .eq('business_id', businessId)
+      .eq('status', 'active')
       .limit(100);
 
     if (productsError) {
@@ -643,6 +648,36 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Public AgentHub pricing is stored in subscription_plans, not products.
+    // Load active plans so WhatsApp uses the same live pricing source as the website.
+    const {
+      data: subscriptionPlans,
+      error: subscriptionPlansError,
+    } = await supabase
+      .from('subscription_plans')
+      .select(
+        `
+          name,
+          description,
+          price_cents,
+          yearly_price_cents,
+          currency,
+          billing_period,
+          features,
+          is_active,
+          sort_order
+        `
+      )
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true });
+
+    if (subscriptionPlansError) {
+      console.error(
+        '[WhatsApp API] Subscription plans error:',
+        subscriptionPlansError
+      );
+    }
+
     /*
     |--------------------------------------------------------------------------
     | 9. GROUP MESSAGE HANDLING
@@ -682,7 +717,7 @@ export async function POST(req: NextRequest) {
                 (product) =>
                   `Product: ${product.name}\nDescription: ${
                     product.description || 'Not provided'
-                  }`
+                  }\nExact Price: ${product.price != null ? `${product.price} ${product.currency || ''}` : 'Not provided'}`
               )
               .join('\n\n')
           : 'No specific products are configured for this group.';
@@ -1450,10 +1485,33 @@ Tags: ${(item.tags || []).join(', ')}`
 Description: ${
                   product.description ||
                   'No description provided'
-                }`
+                }
+Exact Price: ${product.price != null ? `${product.price} ${product.currency || ''}` : 'Not provided'}
+Availability: ${product.availability || 'Not provided'}`
             )
             .join('\n\n')
         : 'No products have been added yet.';
+    const subscriptionPlansContext =
+      subscriptionPlans?.length
+        ? subscriptionPlans
+            .map((plan) => {
+              const currentPrice = typeof plan.price_cents === 'number'
+                ? `${(plan.price_cents / 100).toFixed(2)} ${plan.currency || ''}`
+                : 'Not provided';
+              const yearlyPrice = typeof plan.yearly_price_cents === 'number'
+                ? `${(plan.yearly_price_cents / 100).toFixed(2)} ${plan.currency || ''}`
+                : 'Not provided';
+              const features = Array.isArray(plan.features) && plan.features.length
+                ? plan.features.join(', ')
+                : 'No feature list provided';
+              return `Plan: ${plan.name}
+Description: ${plan.description || 'Not provided'}
+Exact ${plan.billing_period || 'monthly'} Price: ${currentPrice}
+Exact Yearly Price: ${yearlyPrice}
+Features: ${features}`;
+            })
+            .join('\n\n---\n\n')
+        : 'No subscription plans are available.';
 
     /*
     |--------------------------------------------------------------------------
@@ -1525,6 +1583,10 @@ BUSINESS KNOWLEDGE:
 
 ${knowledgeContext}
 
+LIVE SUBSCRIPTION PLANS AND PRICING:
+
+${subscriptionPlansContext}
+
 IMPORTANT RULES:
 
 - You are communicating directly with a customer of ${business.name}.
@@ -1541,6 +1603,11 @@ IMPORTANT RULES:
 - Only use products belonging to ${business.name}.
 - Only use knowledge belonging to ${business.name}.
 - Do not invent products, prices, services, policies or business information.
+- When the customer asks for a price, pricing, cost, rate, plans, package, subscription, or quotation, first use the exact prices in BUSINESS PRODUCTS or LIVE SUBSCRIPTION PLANS above.
+- If an exact price is available in the context, state it clearly and directly. Do NOT tell the customer to contact sales or a team for pricing that is already available.
+- Never guess or invent a missing price.
+- Only say pricing is unavailable when the requested item genuinely has no price in the provided context.
+- For AgentHub plan questions, LIVE SUBSCRIPTION PLANS is the source of truth.
 - If information is unavailable, politely say that you do not have that information yet.
 - Be helpful, professional and natural.
 - Keep replies suitable for WhatsApp.
