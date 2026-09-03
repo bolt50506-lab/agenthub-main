@@ -190,7 +190,8 @@ export async function POST(req: NextRequest) {
           .eq('business_id', business_id)
           .eq('status', 'active')
           .order('created_at', { ascending: false })
-          .limit(50);
+          .limit(20);
+
         // AgentHub's public plans live in subscription_plans, not products.
         // Load the live plans so pricing questions use the same source as the website.
         const { data: subscriptionPlans } = await supabase
@@ -206,7 +207,7 @@ export async function POST(req: NextRequest) {
           .eq('business_id', business_id)
           .eq('status', 'active')
           .order('created_at', { ascending: false })
-          .limit(20);
+          .limit(50);
 
         let systemPrompt = `You are ${agent.name}. Purpose: ${agent.purpose}. Style: ${agent.communication_style || 'professional'}. Goal: ${agent.primary_goal || 'help customers'}.`;
 
