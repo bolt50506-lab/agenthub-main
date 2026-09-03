@@ -1726,6 +1726,60 @@ Conversation behavior:
 
     /*
     |--------------------------------------------------------------------------
+    | 19b. Generate a separate natural voice transcript
+    |--------------------------------------------------------------------------
+    |
+    | WhatsApp text should match the customer's Roman Urdu, but Urdu neural
+    | voices pronounce Roman Urdu as English and misread many words. Create a
+    | voice-only companion in Urdu script without changing the visible text.
+    |
+    */
+    let voiceReply = finalReply;
+
+    const looksLikeRomanUrdu =
+      /\b(aap|ap|hai|hain|kya|kaise|mujhe|hum|ham|yeh|ye|kar|karen|chahiye|plan|price|features?|offer|detail)\b/i.test(finalReply) &&
+      !/[\u0600-\u06FF]/.test(finalReply);
+
+    if (looksLikeRomanUrdu) {
+      try {
+        const voiceTranscriptResponse = await generateAIResponseWithFallback(
+          {
+            messages: [
+              {
+                role: 'user',
+                content: finalReply,
+              },
+            ],
+            systemPrompt: `Convert the following WhatsApp reply from Roman Urdu into natural Pakistani Urdu script for text-to-speech.
+
+STRICT RULES:
+- Preserve exactly the same meaning and information.
+- Do not add, remove, invent, summarize, or change any business facts.
+- Output ONLY the Urdu-script version.
+- Use natural spoken Pakistani Urdu, not literal word-by-word translation.
+- Keep common product/brand names such as WhatsApp, AI, AgentHub, URLs and phone numbers unchanged when appropriate.
+- This output will be spoken by a female Pakistani Urdu neural voice.`,
+            temperature: 0.2,
+            maxTokens: 1024,
+            businessId,
+          },
+          providerConfigs
+        );
+
+        if (voiceTranscriptResponse.content?.trim()) {
+          voiceReply = voiceTranscriptResponse.content.trim();
+          console.log('[WhatsApp API] Generated Urdu-script voice transcript');
+        }
+      } catch (voiceTranscriptError) {
+        console.error(
+          '[WhatsApp API] Voice transcript generation failed; using visible reply:',
+          voiceTranscriptError
+        );
+      }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
     | 20. Save AI response
     |--------------------------------------------------------------------------
     */
@@ -1907,6 +1961,7 @@ Conversation behavior:
     return NextResponse.json({
       success: true,
       reply: finalReply,
+      voice_reply: voiceReply,
       provider: aiResponse.provider,
       model: aiResponse.model,
       appointment_id: bookedAppointmentId,
