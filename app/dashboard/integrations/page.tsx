@@ -214,7 +214,9 @@ export default function IntegrationsPage() {
       }
     }
 
-    // The production database currently allows configuration_required but not configured.\n    // A saved config is still considered ready to connect by the UI below.\n    const newStatus: IntegrationStatus = 'configuration_required';
+    // The production database currently allows configuration_required but not configured.
+    // A saved config is still considered ready to connect by the UI below.
+    const newStatus: IntegrationStatus = 'configuration_required';
 
     if (existing) {
       const { error } = await supabase
