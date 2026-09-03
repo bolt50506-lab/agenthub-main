@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import {
@@ -146,6 +147,8 @@ export default function IntegrationsPage() {
   const [whatsappSessionId, setWhatsappSessionId] = useState<string | null>(null);
   const [whatsappPhone, setWhatsappPhone] = useState<string | null>(null);
   const [whatsappQrError, setWhatsappQrError] = useState<string | null>(null);
+  const [voiceReplyMode, setVoiceReplyMode] = useState<'text_only' | 'voice_only' | 'text_and_voice' | 'random'>('text_and_voice');
+  const [savingVoiceMode, setSavingVoiceMode] = useState(false);
   const qrPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadIntegrations = useCallback(async () => {
@@ -182,6 +185,24 @@ export default function IntegrationsPage() {
     }
     setConfigValues(initial);
     setConfigDialog(type);
+  };
+
+  const handleSaveVoiceMode = async () => {
+    const integration = getIntegration('whatsapp');
+    if (!integration) {
+      toast({ title: 'WhatsApp not configured', description: 'Configure WhatsApp first.', variant: 'destructive' });
+      return;
+    }
+    setSavingVoiceMode(true);
+    const config = { ...((integration.config ?? {}) as Record<string, unknown>), voice_reply_mode: voiceReplyMode };
+    const { error } = await supabase.from('integrations').update({ config }).eq('id', integration.id);
+    setSavingVoiceMode(false);
+    if (error) {
+      toast({ title: 'Failed to save reply mode', description: error.message, variant: 'destructive' });
+      return;
+    }
+    toast({ title: 'Reply mode saved', description: voiceReplyMode === 'random' ? 'Some replies will be text and some voice.' : `WhatsApp reply mode set to ${voiceReplyMode.replaceAll('_', ' ')}.` });
+    await loadIntegrations();
   };
 
   const handleSaveConfig = async () => {
@@ -741,6 +762,30 @@ export default function IntegrationsPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <CardDescription className="text-sm leading-relaxed">{meta.description}</CardDescription>
+
+                {/* WhatsApp reply format rules */}
+                {type === 'whatsapp' && (
+                  <div className="rounded-lg border border-border p-4 space-y-3">
+                    <div>
+                      <p className="text-sm font-medium">AI Reply Format</p>
+                      <p className="text-xs text-muted-foreground mt-1">Choose how the WhatsApp AI replies to customers.</p>
+                    </div>
+                    <Select value={voiceReplyMode} onValueChange={(value) => setVoiceReplyMode(value as 'text_only' | 'voice_only' | 'text_and_voice' | 'random')}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="text_only">Text only</SelectItem>
+                        <SelectItem value="voice_only">Voice only</SelectItem>
+                        <SelectItem value="text_and_voice">Text and voice</SelectItem>
+                        <SelectItem value="random">Random — some text, some voice</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">Random mode chooses independently for every customer message.</p>
+                    <Button size="sm" onClick={handleSaveVoiceMode} disabled={savingVoiceMode}>
+                      {savingVoiceMode && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
+                      Save Reply Rule
+                    </Button>
+                  </div>
+                )}
 
                 {/* WhatsApp QR Code section */}
                 {type === 'whatsapp' && (
