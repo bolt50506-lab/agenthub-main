@@ -39,6 +39,23 @@ export default function Home() {
     })();
   }, []);
 
+  // Public AgentHub AI website chat widget
+  useEffect(() => {
+    const scriptId = 'agenthub-public-chat-widget';
+    if (document.getElementById(scriptId)) return;
+
+    const script = document.createElement('script');
+    script.id = scriptId;
+    script.src = 'https://agenthubai.vercel.app/widget-js?business=11f62525-3c27-474d-854e-e474c7211d43';
+    script.async = true;
+    document.body.appendChild(script);
+
+    return () => {
+      // The widget is global and should remain mounted while navigating
+      // within the public landing page.
+    };
+  }, []);
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white dark:from-slate-950 dark:to-slate-900">
       {/* Nav */}
