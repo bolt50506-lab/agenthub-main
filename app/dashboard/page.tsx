@@ -1,0 +1,279 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useAuth } from '@/lib/auth-context';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Users, Calendar, CheckSquare, Bot, TrendingUp, Clock, ArrowRight } from 'lucide-react';
+import { supabase } from '@/lib/supabase/client';
+import Link from 'next/link';
+import { LEAD_STATUSES, APPOINTMENT_STATUSES, FOLLOWUP_STATUSES } from '@/lib/types/database';
+
+interface DashboardData {
+  totalLeads: number;
+  newLeads: number;
+  appointments: number;
+  pendingFollowUps: number;
+  activeAgents: number;
+  recentLeads: Array<{ id: string; name: string; status: string; created_at: string; interested_product: string | null }>;
+  upcomingAppointments: Array<{ id: string; customer_name: string | null; date: string; start_time: string; status: string }>;
+  pendingFollowUpsList: Array<{ id: string; task_type: string; scheduled_at: string; notes: string | null; status: string }>;
+  recentActivities: Array<{ id: string; action: string; entity_type: string | null; created_at: string }>;
+  agents: Array<{ id: string; name: string; status: string; purpose: string }>;
+}
+
+export default function DashboardOverview() {
+  const { activeBusiness } = useAuth();
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!activeBusiness) return;
+    (async () => {
+      const bizId = activeBusiness.id;
+
+      const [leads, newLeads, appointments, followUps, agents, activities] = await Promise.all([
+        supabase.from('leads').select('id, name, status, created_at, interested_product').eq('business_id', bizId).order('created_at', { ascending: false }).limit(5),
+        supabase.from('leads').select('id', { count: 'exact', head: true }).eq('business_id', bizId),
+        supabase.from('appointments').select('id, customer_name, date, start_time, status').eq('business_id', bizId).gte('date', new Date().toISOString().split('T')[0]).order('date', { ascending: true }).limit(5),
+        supabase.from('follow_up_tasks').select('id, task_type, scheduled_at, notes, status').eq('business_id', bizId).eq('status', 'pending').order('scheduled_at', { ascending: true }).limit(5),
+        supabase.from('agents').select('id, name, status, purpose').eq('business_id', bizId),
+        supabase.from('activity_logs').select('id, action, entity_type, created_at').eq('business_id', bizId).order('created_at', { ascending: false }).limit(8),
+      ]);
+
+      const newLeadsCount = (newLeads.data as Array<{ status: string }> | null)?.filter((l) => l.status === 'new').length ?? 0;
+      const pendingFollowUpsCount = (followUps.data ?? []).length;
+      const activeAgents = (agents.data ?? []).filter((a) => a.status === 'active').length;
+
+      setData({
+        totalLeads: leads.count ?? 0,
+        newLeads: newLeadsCount,
+        appointments: appointments.count ?? 0,
+        pendingFollowUps: pendingFollowUpsCount,
+        activeAgents,
+        recentLeads: leads.data ?? [],
+        upcomingAppointments: appointments.data ?? [],
+        pendingFollowUpsList: followUps.data ?? [],
+        recentActivities: activities.data ?? [],
+        agents: agents.data ?? [],
+      });
+      setLoading(false);
+    })();
+  }, [activeBusiness]);
+
+  if (loading) {
+    return <div className="animate-pulse text-muted-foreground">Loading dashboard...</div>;
+  }
+
+  if (!data) return null;
+
+  const stats = [
+    { label: 'Total Leads', value: data.totalLeads, icon: Users, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-950/30' },
+    { label: 'New Leads', value: data.newLeads, icon: TrendingUp, color: 'text-teal-600 dark:text-teal-400', bg: 'bg-teal-50 dark:bg-teal-950/30' },
+    { label: 'Appointments', value: data.appointments, icon: Calendar, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-950/30' },
+    { label: 'Pending Follow-ups', value: data.pendingFollowUps, icon: CheckSquare, color: 'text-orange-600 dark:text-orange-400', bg: 'bg-orange-50 dark:bg-orange-950/30' },
+    { label: 'Active AI Agents', value: data.activeAgents, icon: Bot, color: 'text-primary', bg: 'bg-primary/5' },
+  ];
+
+  return (
+    <div className="space-y-6">
+      {/* Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+        {stats.map((stat) => (
+          <Card key={stat.label}>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className={`w-10 h-10 rounded-lg ${stat.bg} flex items-center justify-center`}>
+                  <stat.icon className={`w-5 h-5 ${stat.color}`} />
+                </div>
+              </div>
+              <p className="text-2xl font-bold">{stat.value}</p>
+              <p className="text-sm text-muted-foreground">{stat.label}</p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Recent Leads */}
+        <Card>
+          <CardHeader className="flex-row items-center justify-between">
+            <div>
+              <CardTitle>Recent Leads</CardTitle>
+              <CardDescription>Latest leads captured by your agents</CardDescription>
+            </div>
+            <Link href="/dashboard/leads">
+              <Button variant="ghost" size="sm" className="gap-1">
+                View all <ArrowRight className="w-3.5 h-3.5" />
+              </Button>
+            </Link>
+          </CardHeader>
+          <CardContent>
+            {data.recentLeads.length === 0 ? (
+              <EmptyState icon={Users} message="No leads yet. Your AI agents will capture leads from conversations." />
+            ) : (
+              <div className="space-y-3">
+                {data.recentLeads.map((lead) => {
+                  const statusInfo = LEAD_STATUSES.find((s) => s.value === lead.status);
+                  return (
+                    <Link key={lead.id} href={`/dashboard/leads/${lead.id}`} className="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-accent transition-colors">
+                      <div>
+                        <p className="text-sm font-medium">{lead.name}</p>
+                        <p className="text-xs text-muted-foreground">{lead.interested_product || 'No product specified'}</p>
+                      </div>
+                      <Badge className={statusInfo?.color} variant="secondary">{statusInfo?.label ?? lead.status}</Badge>
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Upcoming Appointments */}
+        <Card>
+          <CardHeader className="flex-row items-center justify-between">
+            <div>
+              <CardTitle>Upcoming Appointments</CardTitle>
+              <CardDescription>Scheduled appointments</CardDescription>
+            </div>
+            <Link href="/dashboard/appointments">
+              <Button variant="ghost" size="sm" className="gap-1">
+                View all <ArrowRight className="w-3.5 h-3.5" />
+              </Button>
+            </Link>
+          </CardHeader>
+          <CardContent>
+            {data.upcomingAppointments.length === 0 ? (
+              <EmptyState icon={Calendar} message="No upcoming appointments. Book appointments from leads or conversations." />
+            ) : (
+              <div className="space-y-3">
+                {data.upcomingAppointments.map((apt) => {
+                  const statusInfo = APPOINTMENT_STATUSES.find((s) => s.value === apt.status);
+                  return (
+                    <div key={apt.id} className="flex items-center justify-between p-3 rounded-lg border border-border">
+                      <div className="flex items-center gap-3">
+                        <Clock className="w-4 h-4 text-muted-foreground" />
+                        <div>
+                          <p className="text-sm font-medium">{apt.customer_name || 'Unknown'}</p>
+                          <p className="text-xs text-muted-foreground">{apt.date} at {apt.start_time}</p>
+                        </div>
+                      </div>
+                      <Badge className={statusInfo?.color} variant="secondary">{statusInfo?.label ?? apt.status}</Badge>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Pending Follow-ups */}
+        <Card>
+          <CardHeader className="flex-row items-center justify-between">
+            <div>
+              <CardTitle>Pending Follow-ups</CardTitle>
+              <CardDescription>Tasks that need attention</CardDescription>
+            </div>
+            <Link href="/dashboard/follow-ups">
+              <Button variant="ghost" size="sm" className="gap-1">
+                View all <ArrowRight className="w-3.5 h-3.5" />
+              </Button>
+            </Link>
+          </CardHeader>
+          <CardContent>
+            {data.pendingFollowUpsList.length === 0 ? (
+              <EmptyState icon={CheckSquare} message="No pending follow-ups. Tasks will appear here when created." />
+            ) : (
+              <div className="space-y-3">
+                {data.pendingFollowUpsList.map((fu) => {
+                  const statusInfo = FOLLOWUP_STATUSES.find((s) => s.value === fu.status);
+                  return (
+                    <div key={fu.id} className="flex items-center justify-between p-3 rounded-lg border border-border">
+                      <div>
+                        <p className="text-sm font-medium capitalize">{fu.task_type}</p>
+                        <p className="text-xs text-muted-foreground">{new Date(fu.scheduled_at).toLocaleString()}</p>
+                      </div>
+                      <Badge className={statusInfo?.color} variant="secondary">{statusInfo?.label ?? fu.status}</Badge>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Agent Status */}
+        <Card>
+          <CardHeader className="flex-row items-center justify-between">
+            <div>
+              <CardTitle>Agent Status</CardTitle>
+              <CardDescription>Your AI agents</CardDescription>
+            </div>
+            <Link href="/dashboard/agents">
+              <Button variant="ghost" size="sm" className="gap-1">
+                Manage <ArrowRight className="w-3.5 h-3.5" />
+              </Button>
+            </Link>
+          </CardHeader>
+          <CardContent>
+            {data.agents.length === 0 ? (
+              <EmptyState icon={Bot} message="No agents yet. Create an AI agent to start automating conversations." />
+            ) : (
+              <div className="space-y-3">
+                {data.agents.map((agent) => (
+                  <div key={agent.id} className="flex items-center justify-between p-3 rounded-lg border border-border">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${agent.status === 'active' ? 'bg-green-50 dark:bg-green-950/30' : 'bg-muted'}`}>
+                        <Bot className={`w-4 h-4 ${agent.status === 'active' ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'}`} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium">{agent.name}</p>
+                        <p className="text-xs text-muted-foreground">{agent.purpose}</p>
+                      </div>
+                    </div>
+                    <Badge variant={agent.status === 'active' ? 'default' : 'secondary'} className="capitalize">{agent.status}</Badge>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Recent Activity */}
+      {data.recentActivities.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Recent Activity</CardTitle>
+            <CardDescription>Latest actions in your workspace</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {data.recentActivities.map((activity) => (
+                <div key={activity.id} className="flex items-center gap-3 text-sm">
+                  <div className="w-2 h-2 rounded-full bg-primary" />
+                  <span className="font-medium">{activity.action}</span>
+                  {activity.entity_type && <span className="text-muted-foreground">on {activity.entity_type}</span>}
+                  <span className="text-muted-foreground ml-auto text-xs">{new Date(activity.created_at).toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function EmptyState({ icon: Icon, message }: { icon: React.ElementType; message: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-8 text-center">
+      <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center mb-3">
+        <Icon className="w-6 h-6 text-muted-foreground" />
+      </div>
+      <p className="text-sm text-muted-foreground max-w-xs">{message}</p>
+    </div>
+  );
+}

@@ -1,0 +1,2 @@
+[functions.create-business-owner]
+verify_jwt = true
