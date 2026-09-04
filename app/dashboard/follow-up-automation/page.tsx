@@ -73,7 +73,7 @@ export default function FollowUpAutomationPage() {
   return <div className="max-w-3xl space-y-6">
     <div>
       <h1 className="text-2xl font-bold flex items-center gap-2"><Zap className="w-6 h-6 text-primary" /> Follow-up Automation</h1>
-      <p className="text-muted-foreground mt-1">Automatically schedule and process follow-ups for your leads.</p>
+      <p className="text-muted-foreground mt-1">Automatically schedule, send, and manage follow-ups for your leads.</p>
     </div>
 
     <Card>
