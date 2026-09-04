@@ -26,6 +26,7 @@ export async function GET(req: NextRequest) {
       .from('leads')
       .select('*')
       .eq('business_id', settings.business_id)
+      .gte('created_at', settings.created_at)
       .not('status', 'in', '("won","lost")')
       .limit(200);
 
