@@ -87,6 +87,31 @@ export async function DELETE(
   const auth = await requireManager(req, voice.business_id);
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
+  if (voice.provider === 'voicebox') {
+    const { data: config } = await auth.supabase
+      .from('voice_provider_configs')
+      .select('base_url')
+      .eq('provider', 'voicebox')
+      .maybeSingle();
+
+    const baseUrl = (config?.base_url || '').replace(/\/$/, '');
+    if (baseUrl) {
+      const providerResponse = await fetch(
+        `${baseUrl}/profiles/${encodeURIComponent(voice.provider_voice_id)}`,
+        { method: 'DELETE' }
+      ).catch(() => null);
+
+      // Allow AgentHub cleanup if the remote/local profile is already gone.
+      if (providerResponse && !providerResponse.ok && providerResponse.status !== 404) {
+        const text = await providerResponse.text();
+        return NextResponse.json(
+          { error: 'Voicebox profile deletion failed', details: text.slice(0, 500) },
+          { status: 502 }
+        );
+      }
+    }
+  }
+
   if (voice.provider === 'elevenlabs') {
     const { data: config } = await auth.supabase
       .from('voice_provider_configs')
