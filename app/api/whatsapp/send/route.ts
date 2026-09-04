@@ -4,7 +4,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 export const dynamic = 'force-dynamic';
 
 const WHATSAPP_QR_SERVICE_URL =
-  process.env.WHATSAPP_QR_SERVICE_URL || 'http://localhost:3001';
+  process.env.WHATSAPP_QR_SERVICE_URL || 'https://agenthub-whatsapp-service-production.up.railway.app';
 
 const OUTBOUND_API_TOKEN = process.env.OUTBOUND_API_TOKEN || '';
 
@@ -29,10 +29,7 @@ export async function POST(req: NextRequest) {
     const { business_id, conversation_id, message } = body;
 
     if (!business_id || !conversation_id || !message?.trim()) {
-      return NextResponse.json(
-        { success: false, error: 'business_id, conversation_id and message are required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, error: 'business_id, conversation_id and message are required' }, { status: 400 });
     }
 
     const supabase = createServiceClient();
@@ -45,24 +42,15 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (conversationError || !conversation) {
-      return NextResponse.json(
-        { success: false, error: 'Conversation not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ success: false, error: 'Conversation not found' }, { status: 404 });
     }
 
     if (conversation.channel !== 'whatsapp') {
-      return NextResponse.json(
-        { success: false, error: 'This route only supports WhatsApp conversations' },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, error: 'This route only supports WhatsApp conversations' }, { status: 400 });
     }
 
     if (!conversation.customer_id) {
-      return NextResponse.json(
-        { success: false, error: 'This conversation has no customer phone number' },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, error: 'This conversation has no customer phone number' }, { status: 400 });
     }
 
     const { data: customer } = await supabase
@@ -71,15 +59,10 @@ export async function POST(req: NextRequest) {
       .eq('id', conversation.customer_id)
       .maybeSingle();
 
-    const destination = normalizeWhatsAppJid(
-      customer?.phone || customer?.external_id || ''
-    );
+    const destination = normalizeWhatsAppJid(customer?.phone || customer?.external_id || '');
 
     if (!destination) {
-      return NextResponse.json(
-        { success: false, error: 'Customer WhatsApp number is not available' },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, error: 'Customer WhatsApp number is not available' }, { status: 400 });
     }
 
     const { data: session } = await supabase
@@ -93,10 +76,7 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (!session?.session_id) {
-      return NextResponse.json(
-        { success: false, error: 'No connected WhatsApp QR session was found' },
-        { status: 409 }
-      );
+      return NextResponse.json({ success: false, error: 'No connected WhatsApp QR session was found' }, { status: 409 });
     }
 
     const serviceResponse = await fetch(
@@ -105,14 +85,9 @@ export async function POST(req: NextRequest) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(OUTBOUND_API_TOKEN
-            ? { Authorization: `Bearer ${OUTBOUND_API_TOKEN}` }
-            : {}),
+          ...(OUTBOUND_API_TOKEN ? { Authorization: `Bearer ${OUTBOUND_API_TOKEN}` } : {}),
         },
-        body: JSON.stringify({
-          to: destination,
-          message: message.trim(),
-        }),
+        body: JSON.stringify({ to: destination, message: message.trim() }),
         cache: 'no-store',
       }
     );
@@ -120,13 +95,7 @@ export async function POST(req: NextRequest) {
     const serviceData = await serviceResponse.json().catch(() => null);
 
     if (!serviceResponse.ok || serviceData?.success === false) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: serviceData?.message || 'WhatsApp provider could not send the message',
-        },
-        { status: 502 }
-      );
+      return NextResponse.json({ success: false, error: serviceData?.message || 'WhatsApp provider could not send the message' }, { status: 502 });
     }
 
     const { error: insertError } = await supabase.from('messages').insert({
@@ -136,28 +105,32 @@ export async function POST(req: NextRequest) {
       content: message.trim(),
       content_type: 'text',
       is_inbound: false,
-      metadata: { sent_via: 'dashboard_whatsapp' },
+      metadata: { sent_via: 'dashboard_whatsapp', human_takeover: true },
     });
 
     if (insertError) {
       console.error('Dashboard WhatsApp message was sent but could not be recorded:', insertError.message);
     }
 
-    await supabase
+    // A successful manual business reply is the explicit human-takeover signal.
+    // Keep the conversation in human mode until the operator chooses Resume AI.
+    const { error: takeoverError } = await supabase
       .from('conversations')
-      .update({ last_message_at: new Date().toISOString() })
-      .eq('id', conversation_id);
+      .update({
+        human_takeover: true,
+        human_takeover_at: new Date().toISOString(),
+        last_message_at: new Date().toISOString(),
+      })
+      .eq('id', conversation_id)
+      .eq('business_id', business_id);
 
-    return NextResponse.json({ success: true });
+    if (takeoverError) {
+      console.error('[WhatsApp] Manual reply sent but human takeover state could not be saved:', takeoverError.message);
+    }
+
+    return NextResponse.json({ success: true, mode: 'human' });
   } catch (error) {
     console.error('Dashboard WhatsApp send error:', error);
-
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Internal server error',
-      },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: error instanceof Error ? error.message : 'Internal server error' }, { status: 500 });
   }
 }
