@@ -41,6 +41,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const requestStartedAt = Date.now();
+  const stage = (name: string, startedAt: number) => console.log(`[WhatsApp AI Timing] ${name}: ${Date.now() - startedAt}ms`);
   const body = await req.json() as {
     entry?: Array<{
       changes?: Array<{
@@ -60,6 +62,7 @@ export async function POST(req: NextRequest) {
   };
 
   const supabase = createServiceClient();
+  const databaseStartedAt = Date.now();
 
   const entry = body.entry?.[0];
   const change = entry?.changes?.[0];
@@ -205,6 +208,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ status: 'no_conversation' }, { headers: CORS });
   }
 
+  stage('customer_and_conversation_setup', databaseStartedAt);
+
   await supabase.from('messages').insert({
     business_id: businessId,
     conversation_id: conversationId,
@@ -271,6 +276,35 @@ export async function POST(req: NextRequest) {
         .order('priority', { ascending: true });
 
       if (providerRows && providerRows.length > 0) {
+        const contextStartedAt = Date.now();
+        const [prevMessagesResult, knowledgeItemsResult, productsResult] = await Promise.all([
+          supabase
+            .from('messages')
+            .select('sender_type, content')
+            .eq('conversation_id', conversationId)
+            .order('created_at', { ascending: false })
+            .limit(4),
+          supabase
+            .from('knowledge_items')
+            .select('title, content, category')
+            .eq('business_id', businessId)
+            .eq('status', 'active')
+            .order('created_at', { ascending: false })
+            .limit(5),
+          supabase
+            .from('products')
+            .select('name, description, price, currency, availability, sku')
+            .eq('business_id', businessId)
+            .eq('status', 'active')
+            .order('created_at', { ascending: false })
+            .limit(5),
+        ]);
+        const prevMessages = prevMessagesResult.data;
+        const knowledgeItems = knowledgeItemsResult.data;
+        const products = productsResult.data;
+        stage('context_queries_parallel', contextStartedAt);
+
+        /* OLD SERIAL QUERIES REMOVED
         const { data: prevMessages } = await supabase
           .from('messages')
           .select('sender_type, content')
@@ -295,6 +329,7 @@ export async function POST(req: NextRequest) {
           .eq('status', 'active')
           .order('created_at', { ascending: false })
           .limit(8);
+        */
 
         let systemPrompt = `You are ${agentData.name}. Purpose: ${agentData.purpose}. Style: ${agentData.communication_style || 'professional'}. Goal: ${agentData.primary_goal || 'help customers'}. Give concise, direct replies suitable for instant messaging. Do not over-explain unless the customer asks for detail.`;
 
@@ -356,6 +391,7 @@ export async function POST(req: NextRequest) {
             maxTokens: Math.min(settings?.max_response_length ?? 512, 180),
           }));
 
+          const aiStartedAt = Date.now();
           const response = await generateAIResponseWithFallback(
             {
               messages: aiMessages,
@@ -364,6 +400,7 @@ export async function POST(req: NextRequest) {
             },
             providerConfigs
           );
+          stage('ai_generation_total', aiStartedAt);
           reply = response.content || '';
           if (response.error) reply = '';
         } catch {
@@ -412,5 +449,6 @@ export async function POST(req: NextRequest) {
     } catch { /* best effort */ }
   }
 
+  console.log(`[WhatsApp AI Timing] total_request: ${Date.now() - requestStartedAt}ms`);
   return NextResponse.json({ status: 'replied', reply }, { headers: CORS });
 }
