@@ -23,6 +23,7 @@ export default function ConversationsPage() {
   const [channel, setChannel] = useState<'all' | 'website_chat' | 'whatsapp'>('all');
   const [replyText, setReplyText] = useState('');
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   const loadConversations = useCallback(async () => {
@@ -129,29 +130,53 @@ export default function ConversationsPage() {
   const selectedConversation = conversations.find((conversation) => conversation.id === selectedId) ?? null;
 
   const sendManualReply = async () => {
-    if (!activeBusiness || !selectedId || !replyText.trim() || sending) return;
+    if (!activeBusiness || !selectedId || !selectedConversation || !replyText.trim() || sending) return;
 
     setSending(true);
+    setSendError(null);
     const content = replyText.trim();
-    const { error } = await supabase.from('messages').insert({
-      business_id: activeBusiness.id,
-      conversation_id: selectedId,
-      sender_type: 'business',
-      content,
-      content_type: 'text',
-      is_inbound: false,
-    });
 
-    if (!error) {
-      await supabase
-        .from('conversations')
-        .update({ last_message_at: new Date().toISOString() })
-        .eq('id', selectedId);
+    try {
+      if (selectedConversation.channel === 'whatsapp') {
+        const response = await fetch('/api/whatsapp/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            business_id: activeBusiness.id,
+            conversation_id: selectedId,
+            message: content,
+          }),
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result?.success) {
+          throw new Error(result?.error || 'WhatsApp message could not be sent');
+        }
+      } else {
+        const { error } = await supabase.from('messages').insert({
+          business_id: activeBusiness.id,
+          conversation_id: selectedId,
+          sender_type: 'business',
+          content,
+          content_type: 'text',
+          is_inbound: false,
+        });
+
+        if (error) throw error;
+
+        await supabase
+          .from('conversations')
+          .update({ last_message_at: new Date().toISOString() })
+          .eq('id', selectedId);
+      }
 
       setReplyText('');
       await Promise.all([loadMessages(selectedId), loadConversations()]);
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : 'Message could not be sent');
+    } finally {
+      setSending(false);
     }
-    setSending(false);
   };
 
   if (loading) {
@@ -177,8 +202,8 @@ export default function ConversationsPage() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[380px_minmax(0,1fr)]">
-        <Card className="overflow-hidden">
+      <div className="grid min-h-0 grid-cols-1 gap-4 xl:h-[calc(100vh-11rem)] xl:grid-cols-[380px_minmax(0,1fr)]">
+        <Card className="flex min-h-[420px] flex-col overflow-hidden xl:min-h-0">
           <CardHeader className="space-y-3 pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">All conversations</CardTitle>
@@ -207,7 +232,7 @@ export default function ConversationsPage() {
             </div>
           </CardHeader>
 
-          <CardContent className="max-h-[620px] overflow-y-auto p-0">
+          <CardContent className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-0">
             {filteredConversations.length === 0 ? (
               <div className="px-6 py-14 text-center">
                 <MessageSquare className="mx-auto mb-3 h-10 w-10 text-muted-foreground/40" />
@@ -255,7 +280,7 @@ export default function ConversationsPage() {
           </CardContent>
         </Card>
 
-        <Card className="flex min-h-[620px] flex-col overflow-hidden">
+        <Card className="flex min-h-[520px] flex-col overflow-hidden xl:min-h-0">
           {selectedConversation ? (
             <>
               <CardHeader className="border-b pb-4">
@@ -275,7 +300,7 @@ export default function ConversationsPage() {
               </CardHeader>
 
               <CardContent className="flex min-h-0 flex-1 flex-col p-0">
-                <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-muted/20 p-4">
+                <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain bg-muted/20 p-4">
                   {messagesLoading ? (
                     <div className="flex h-full items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
                   ) : messages.length === 0 ? (
@@ -299,30 +324,27 @@ export default function ConversationsPage() {
                   <div ref={bottomRef} />
                 </div>
 
-                <div className="border-t bg-card p-3">
-                  {selectedConversation.channel === 'website_chat' ? (
-                    <>
-                      <p className="mb-2 text-[11px] text-muted-foreground">
-                        Team replies are delivered live to the visitor&apos;s open AgentHub website chat.
-                      </p>
-                      <div className="flex gap-2">
-                        <Input
-                          value={replyText}
-                          onChange={(e) => setReplyText(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendManualReply(); } }}
-                          placeholder="Type a team reply..."
-                          disabled={sending}
-                        />
-                        <Button onClick={sendManualReply} disabled={!replyText.trim() || sending}>
-                          {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                        </Button>
-                      </div>
-                    </>
-                  ) : (
-                    <p className="text-[11px] text-muted-foreground">
-                      WhatsApp messages are visible here for monitoring. Manual WhatsApp replies will be enabled through the connected WhatsApp provider service.
-                    </p>
+                <div className="shrink-0 border-t bg-card p-3">
+                  <p className="mb-2 text-[11px] text-muted-foreground">
+                    {selectedConversation.channel === 'website_chat'
+                      ? 'Reply directly to the visitor through the AgentHub website chat.'
+                      : 'Reply directly from AgentHub using your connected WhatsApp session.'}
+                  </p>
+                  {sendError && (
+                    <p className="mb-2 rounded-md bg-destructive/10 px-2 py-1.5 text-xs text-destructive">{sendError}</p>
                   )}
+                  <div className="flex gap-2">
+                    <Input
+                      value={replyText}
+                      onChange={(e) => setReplyText(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendManualReply(); } }}
+                      placeholder={selectedConversation.channel === 'whatsapp' ? 'Reply on WhatsApp...' : 'Type a team reply...'}
+                      disabled={sending}
+                    />
+                    <Button onClick={sendManualReply} disabled={!replyText.trim() || sending}>
+                      {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </>
