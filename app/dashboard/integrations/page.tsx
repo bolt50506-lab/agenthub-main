@@ -147,7 +147,7 @@ export default function IntegrationsPage() {
   const [whatsappSessionId, setWhatsappSessionId] = useState<string | null>(null);
   const [whatsappPhone, setWhatsappPhone] = useState<string | null>(null);
   const [whatsappQrError, setWhatsappQrError] = useState<string | null>(null);
-  const [voiceReplyMode, setVoiceReplyMode] = useState<'text_only' | 'voice_only' | 'text_and_voice' | 'random'>('text_and_voice');
+  const [voiceReplyMode, setVoiceReplyMode] = useState<'disabled' | 'text_only' | 'voice_only' | 'text_and_voice' | 'random'>('text_and_voice');
   const [savingVoiceMode, setSavingVoiceMode] = useState(false);
   const qrPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -770,9 +770,10 @@ export default function IntegrationsPage() {
                       <p className="text-sm font-medium">AI Reply Format</p>
                       <p className="text-xs text-muted-foreground mt-1">Choose how the WhatsApp AI replies to customers.</p>
                     </div>
-                    <Select value={voiceReplyMode} onValueChange={(value) => setVoiceReplyMode(value as 'text_only' | 'voice_only' | 'text_and_voice' | 'random')}>
+                    <Select value={voiceReplyMode} onValueChange={(value) => setVoiceReplyMode(value as 'disabled' | 'text_only' | 'voice_only' | 'text_and_voice' | 'random')}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="disabled">Voice disabled — normal text replies</SelectItem>
                         <SelectItem value="text_only">Text only</SelectItem>
                         <SelectItem value="voice_only">Voice only</SelectItem>
                         <SelectItem value="text_and_voice">Text and voice</SelectItem>
