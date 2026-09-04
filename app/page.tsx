@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import type { SubscriptionPlan } from '@/lib/types/database';
 import {
   ArrowRight, Bot, Check, ChevronRight, CirclePlay, Clock3, Facebook, Globe2,
-  Instagram, LayoutDashboard, MessageCircle, Phone, Send, ShieldCheck,
+  Instagram, LayoutDashboard, MessageCircle, Phone, Send, ShieldCheck, Users,
   Sparkles, Zap, CalendarCheck, Database, BarChart3, Repeat2, Workflow
 } from 'lucide-react';
 
