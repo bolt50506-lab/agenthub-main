@@ -64,7 +64,7 @@ export default function FollowUpAutomationPage() {
   const setChannel = (channel: string, checked: boolean) => {
     setSettings((current) => ({
       ...current,
-      channels: checked ? [...new Set([...current.channels, channel])] : current.channels.filter((item) => item !== channel),
+      channels: checked ? (current.channels.includes(channel) ? current.channels : current.channels.concat(channel)) : current.channels.filter((item) => item !== channel),
     }));
   };
 
