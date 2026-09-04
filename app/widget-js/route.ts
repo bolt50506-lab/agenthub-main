@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
   var MESSAGES=[];
   var SESSION_ID=localStorage.getItem('ah_session_'+BUSINESS_ID);
   var VISITOR_ID=localStorage.getItem('ah_visitor_'+BUSINESS_ID);
-  var SEEN_BUSINESS_REPLY_IDS={};
+  var LAST_BUSINESS_REPLY_AT=localStorage.getItem('ah_last_business_reply_'+BUSINESS_ID)||'';
   var POLL_TIMER=null;
 
   function createWidget(){
@@ -112,14 +112,17 @@ export async function GET(req: NextRequest) {
 
     function pollBusinessReplies(){
       if(!SESSION_ID||!VISITOR_ID)return;
-      fetch(API_BASE+'/api/widget/messages?business_id='+encodeURIComponent(BUSINESS_ID)+'&session_id='+encodeURIComponent(SESSION_ID)+'&visitor_id='+encodeURIComponent(VISITOR_ID))
+      var pollUrl=API_BASE+'/api/widget/messages?business_id='+encodeURIComponent(BUSINESS_ID)+'&session_id='+encodeURIComponent(SESSION_ID)+'&visitor_id='+encodeURIComponent(VISITOR_ID);
+      if(LAST_BUSINESS_REPLY_AT)pollUrl+='&after='+encodeURIComponent(LAST_BUSINESS_REPLY_AT);
+      fetch(pollUrl)
         .then(function(r){return r.ok?r.json():null;})
         .then(function(data){
           if(!data||!data.messages)return;
           data.messages.forEach(function(message){
-            if(!SEEN_BUSINESS_REPLY_IDS[message.id]){
-              SEEN_BUSINESS_REPLY_IDS[message.id]=true;
-              addMessage(message.content,'agent');
+            addMessage(message.content,'agent');
+            if(message.created_at){
+              LAST_BUSINESS_REPLY_AT=message.created_at;
+              localStorage.setItem('ah_last_business_reply_'+BUSINESS_ID,LAST_BUSINESS_REPLY_AT);
             }
           });
         }).catch(function(){});
