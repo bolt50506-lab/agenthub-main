@@ -7,7 +7,7 @@ import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { MessageSquare, Zap, Shield, Bot, ArrowRight, Check, Phone, MessageCircle } from 'lucide-react';
+import { MessageSquare, Zap, Shield, Bot, ArrowRight, Check, Phone, MessageCircle, Sparkles, Globe2, CalendarDays, BarChart3, CirclePlay, Send } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import type { SubscriptionPlan } from '@/lib/types/database';
 
@@ -57,7 +57,7 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white dark:from-slate-950 dark:to-slate-900">
+    <div className="min-h-screen bg-white dark:bg-slate-950">
       {/* Nav */}
       <nav className="border-b border-border/40 bg-white/80 dark:bg-slate-950/80 backdrop-blur-sm sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -66,6 +66,12 @@ export default function Home() {
               <Bot className="w-5 h-5 text-primary-foreground" />
             </div>
             <span className="text-lg font-bold tracking-tight">AgentHub</span>
+          </div>
+          <div className="hidden md:flex items-center gap-6 text-sm font-medium text-muted-foreground">
+            <Link href="#features" className="hover:text-foreground transition-colors">Features</Link>
+            <Link href="#how-it-works" className="hover:text-foreground transition-colors">How It Works</Link>
+            <Link href="#pricing" className="hover:text-foreground transition-colors">Pricing</Link>
+            <Link href="#contact" className="hover:text-foreground transition-colors">Contact</Link>
           </div>
           <div className="flex items-center gap-4">
             <Link href="/login" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
@@ -78,42 +84,161 @@ export default function Home() {
         </div>
       </nav>
 
-      {/* Hero */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16 text-center">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-sm font-medium mb-6">
-          <Zap className="w-3.5 h-3.5" />
-          AI-Powered Business Automation
+      {/* Premium Hero */}
+      <section className="relative overflow-hidden bg-[#050816] text-white">
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="absolute left-1/2 top-0 h-[650px] w-[900px] -translate-x-1/2 rounded-full bg-violet-700/20 blur-[150px]" />
+          <div className="absolute right-[-10%] top-[20%] h-[360px] w-[360px] rounded-full bg-indigo-500/15 blur-[120px]" />
         </div>
-        <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight text-foreground max-w-3xl mx-auto leading-tight">
-          Turn Conversations Into Business Actions
-        </h1>
-        <p className="mt-6 text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-          Connect WhatsApp and other channels. Deploy AI agents that answer questions, capture leads,
-          book appointments, and create follow-ups — all organized in one dashboard.
-        </p>
-        <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
-          <Link href="/login">
-            <Button size="lg" className="gap-2">
-              Get Started <ArrowRight className="w-4 h-4" />
-            </Button>
-          </Link>
-          <Link href="#pricing">
-            <Button size="lg" variant="outline">View Plans</Button>
-          </Link>
-          <a href="https://wa.me/923407465567" target="_blank" rel="noreferrer">
-            <Button size="lg" variant="outline" className="gap-2">
-              <MessageCircle className="w-4 h-4" />
-              WhatsApp Us
-            </Button>
-          </a>
+
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-16 pb-20 lg:pt-24 lg:pb-28 grid gap-14 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-violet-400/30 bg-violet-500/10 px-4 py-2 text-sm font-medium text-violet-200 mb-6">
+              <Sparkles className="w-4 h-4" />
+              Your AI Employee for WhatsApp & Your Website
+            </div>
+
+            <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold tracking-tight leading-[1.04]">
+              AgentHub AI Works.
+              <span className="block mt-2 bg-gradient-to-r from-violet-400 via-purple-400 to-indigo-400 bg-clip-text text-transparent">You Grow.</span>
+            </h1>
+
+            <p className="mt-7 max-w-xl text-lg leading-8 text-slate-300">
+              AgentHub automatically answers customers, captures leads, shares product information,
+              books appointments and follows up — so your business stays active 24/7.
+            </p>
+
+            <div className="mt-8 grid gap-3 sm:grid-cols-2 text-sm text-slate-200">
+              {[
+                'AI-powered customer conversations',
+                'Instant lead capture & follow-ups',
+                'WhatsApp & website automation',
+                'Appointments & reminders',
+                'Knowledge base & products',
+                'One powerful business dashboard',
+              ].map((item) => (
+                <div key={item} className="flex items-center gap-3">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-violet-500/15 text-violet-300">
+                    <Check className="w-4 h-4" />
+                  </span>
+                  {item}
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-10 flex flex-col sm:flex-row gap-3">
+              <Link href="#pricing">
+                <Button size="lg" className="h-14 w-full sm:w-auto rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-7 text-base shadow-xl shadow-violet-600/20 hover:from-violet-500 hover:to-indigo-500">
+                  Start with AgentHub <ArrowRight className="ml-2 w-5 h-5" />
+                </Button>
+              </Link>
+              <Link href="#how-it-works">
+                <Button size="lg" variant="outline" className="h-14 w-full sm:w-auto rounded-xl border-white/20 bg-white/[0.03] px-7 text-base text-white hover:bg-white/10 hover:text-white">
+                  <CirclePlay className="mr-2 w-5 h-5" />
+                  See How It Works
+                </Button>
+              </Link>
+            </div>
+          </div>
+
+          <div className="relative mx-auto w-full max-w-2xl">
+            <div className="absolute -inset-6 rounded-[38px] bg-gradient-to-br from-violet-500/25 to-indigo-500/10 blur-3xl" />
+            <div className="relative overflow-hidden rounded-[28px] border border-white/10 bg-[#0b1024] p-3 shadow-2xl shadow-black/50">
+              <div className="grid min-h-[500px] grid-cols-[165px_1fr] overflow-hidden rounded-2xl border border-white/10 bg-[#0b1124]">
+                <aside className="hidden sm:block border-r border-white/10 bg-[#0a0f20] p-4">
+                  <div className="mb-7 flex items-center gap-2 text-sm font-semibold">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-600"><Bot className="w-4 h-4" /></div>
+                    AgentHub
+                  </div>
+                  {['Dashboard','Conversations','Leads','Appointments','Follow-ups','Agents','Knowledge Base','Products','Integrations'].map((item, i) => (
+                    <div key={item} className={i === 0 ? 'mb-1 rounded-lg bg-violet-600/30 px-3 py-2 text-xs text-white' : 'mb-1 rounded-lg px-3 py-2 text-xs text-slate-400'}>
+                      {item}
+                    </div>
+                  ))}
+                </aside>
+
+                <div className="min-w-0 p-4 sm:p-5">
+                  <div className="mb-5 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-slate-500">AgentHub Dashboard</p>
+                      <h2 className="mt-1 text-lg font-semibold">Your Business at a Glance</h2>
+                    </div>
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-500/20">
+                      <Bot className="w-4 h-4 text-violet-300" />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {[
+                      ['Conversations','1,248'],
+                      ['Leads Captured','458'],
+                      ['Appointments','128'],
+                      ['Active Customers','892'],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-xl border border-white/10 bg-white/[0.035] p-3">
+                        <p className="text-[10px] text-slate-500">{label}</p>
+                        <p className="mt-1 text-xl font-bold">{value}</p>
+                        <p className="mt-1 text-[9px] text-emerald-400">↑ Active this week</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-4 grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
+                    <div className="rounded-xl border border-white/10 bg-white/[0.025] p-3">
+                      <div className="mb-3 flex justify-between text-xs">
+                        <span className="font-semibold">Conversations</span>
+                        <span className="text-violet-300">View all</span>
+                      </div>
+                      {['John Doe','Sarah Williams','Mike Johnson','Emma Brown'].map((name, i) => (
+                        <div key={name} className="mb-2 flex items-center gap-2 rounded-lg bg-white/[0.03] p-2">
+                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-indigo-500 text-[10px]">{name.charAt(0)}</div>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-[10px] font-medium">{name}</p>
+                            <p className="text-[9px] text-slate-500">{i % 2 ? 'WhatsApp' : 'Website Widget'}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="rounded-xl border border-white/10 bg-white/[0.025] p-3">
+                      <div className="mb-3 flex justify-between">
+                        <div>
+                          <p className="text-xs font-semibold">John Doe</p>
+                          <p className="text-[9px] text-violet-300">Website Widget</p>
+                        </div>
+                        <span className="text-[9px] text-slate-500">2 min ago</span>
+                      </div>
+                      <div className="space-y-3 text-[10px]">
+                        <div className="rounded-xl rounded-tl-sm bg-white/[0.06] p-2.5 text-slate-300">Hi, I want to know more about your services.</div>
+                        <div className="ml-6 rounded-xl rounded-tr-sm bg-violet-600/80 p-2.5">Hello! 👋 I can help with information about our services. What would you like to know?</div>
+                        <div className="rounded-xl rounded-tl-sm bg-white/[0.06] p-2.5 text-slate-300">What are your pricing plans?</div>
+                        <div className="ml-6 rounded-xl rounded-tr-sm bg-violet-600/80 p-2.5">I can explain the available plans and help you choose the right one.</div>
+                      </div>
+                      <div className="mt-4 flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.025] p-2">
+                        <span className="flex-1 text-[9px] text-slate-500">Reply as AgentHub AI...</span>
+                        <Send className="w-3.5 h-3.5 text-violet-300" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="absolute -left-5 bottom-8 hidden sm:flex items-center gap-3 rounded-2xl border border-white/10 bg-[#11182f]/95 p-3 shadow-xl backdrop-blur">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-400">
+                  <MessageCircle className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold">WhatsApp Connected</p>
+                  <p className="text-[10px] text-slate-400">AI replies automatically</p>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-        <p className="mt-4 text-sm text-muted-foreground">
-          Questions before choosing a plan? Contact us on WhatsApp: <a href="https://wa.me/923407465567" target="_blank" rel="noreferrer" className="font-semibold text-primary hover:underline">+92 340 7465567</a>
-        </p>
       </section>
 
       {/* Features */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+      <section id="features" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {[
             { icon: Bot, title: 'AI Agents', desc: 'Deploy agents that understand your business and act on conversations — creating leads, appointments, and tasks automatically.' },
@@ -131,8 +256,8 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Capabilities */}
-      <section className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+      {/* How It Works */}
+      <section id="how-it-works" className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <h2 className="text-2xl font-bold text-center mb-12">Everything your AI agent can do</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {[
