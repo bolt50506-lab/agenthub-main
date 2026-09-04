@@ -45,6 +45,8 @@ export async function GET(req: NextRequest) {
   var MESSAGES=[];
   var SESSION_ID=localStorage.getItem('ah_session_'+BUSINESS_ID);
   var VISITOR_ID=localStorage.getItem('ah_visitor_'+BUSINESS_ID);
+  var SEEN_BUSINESS_REPLY_IDS={};
+  var POLL_TIMER=null;
 
   function createWidget(){
     CONTAINER=document.createElement('div');
@@ -105,7 +107,27 @@ export async function GET(req: NextRequest) {
     function toggleChat(){
       OPEN=!OPEN;
       panel.style.display=OPEN?'flex':'none';
+      if(OPEN){ pollBusinessReplies(); }
     }
+
+    function pollBusinessReplies(){
+      if(!SESSION_ID||!VISITOR_ID)return;
+      fetch(API_BASE+'/api/widget/messages?business_id='+encodeURIComponent(BUSINESS_ID)+'&session_id='+encodeURIComponent(SESSION_ID)+'&visitor_id='+encodeURIComponent(VISITOR_ID))
+        .then(function(r){return r.ok?r.json():null;})
+        .then(function(data){
+          if(!data||!data.messages)return;
+          data.messages.forEach(function(message){
+            if(!SEEN_BUSINESS_REPLY_IDS[message.id]){
+              SEEN_BUSINESS_REPLY_IDS[message.id]=true;
+              addMessage(message.content,'agent');
+            }
+          });
+        }).catch(function(){});
+    }
+
+    POLL_TIMER=setInterval(function(){
+      if(OPEN)pollBusinessReplies();
+    },4000);
 
     function addMessage(text,sender){
       var msg=document.createElement('div');
@@ -136,9 +158,10 @@ export async function GET(req: NextRequest) {
           addMessage('Sorry, I could not process your message.','agent');
           return;
         }
-        if(data.session_id&&!SESSION_ID){SESSION_ID=data.session_id;localStorage.setItem('ah_session_'+BUSINESS_ID,SESSION_ID);}
-        if(data.visitor_id&&!VISITOR_ID){VISITOR_ID=data.visitor_id;localStorage.setItem('ah_visitor_'+BUSINESS_ID,VISITOR_ID);}
+        if(data.session_id){SESSION_ID=data.session_id;localStorage.setItem('ah_session_'+BUSINESS_ID,SESSION_ID);}
+        if(data.visitor_id){VISITOR_ID=data.visitor_id;localStorage.setItem('ah_visitor_'+BUSINESS_ID,VISITOR_ID);}
         if(data.reply){addMessage(data.reply,'agent');}
+        pollBusinessReplies();
       }).catch(function(){
         typing.remove();
         addMessage('Connection error. Please try again.','agent');
