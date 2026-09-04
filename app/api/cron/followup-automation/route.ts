@@ -8,6 +8,22 @@ function authorized(req: NextRequest) {
   return Boolean(secret) && req.headers.get('authorization') === `Bearer ${secret}`;
 }
 
+async function sendThroughAgentHub(task: any, lead: any) {
+  const base = process.env.WHATSAPP_AGENT_URL;
+  const token = process.env.WHATSAPP_AGENT_TOKEN;
+  if (task.channel !== 'whatsapp') throw new Error('Automated delivery for this channel is not connected yet');
+  if (!base) throw new Error('WHATSAPP_AGENT_URL is not configured');
+  const phone = lead?.phone || lead?.phone_number || lead?.customer_phone;
+  if (!phone) throw new Error('Lead has no phone number for WhatsApp follow-up');
+  const response = await fetch(base.replace(/\/$/, '') + '/send-message', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}) },
+    body: JSON.stringify({ phoneNumber: phone, message: task.notes || 'Hi! Just following up to see if you need any help. 😊', businessId: task.business_id, followUpTaskId: task.id }),
+  });
+  if (!response.ok) throw new Error('WhatsApp agent rejected follow-up: ' + response.status + ' ' + await response.text());
+  return response.json().catch(() => ({ success: true }));
+}
+
 export async function GET(req: NextRequest) {
   if (!authorized(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
@@ -31,7 +47,7 @@ export async function GET(req: NextRequest) {
     processed++;
     try {
       const { data: lead } = task.lead_id
-        ? await supabase.from('leads').select('status,conversation_id,customer_id').eq('id', task.lead_id).maybeSingle()
+        ? await supabase.from('leads').select('*').eq('id', task.lead_id).maybeSingle()
         : { data: null };
 
       if (lead && ['won','lost'].includes(lead.status)) {
@@ -39,14 +55,14 @@ export async function GET(req: NextRequest) {
         continue;
       }
 
-      // Delivery is intentionally routed through the existing channel integration layer.
-      // If a deployment has no supported sender for this channel, keep the task pending
-      // and record the failure rather than pretending that a message was sent.
+      const delivery = await sendThroughAgentHub(task, lead);
+      if (delivery && delivery.success === false) throw new Error(delivery.error || 'WhatsApp follow-up send failed');
+
       await supabase.from('follow_up_history').insert({
         follow_up_id: task.id,
         business_id: task.business_id,
-        action: 'due_for_delivery',
-        notes: task.notes || 'Automated follow-up is ready for channel delivery',
+        action: 'sent',
+        notes: task.notes || 'Automated follow-up sent',
       });
 
       await supabase.from('follow_up_tasks').update({
