@@ -61,6 +61,10 @@ export async function POST(req: NextRequest) {
 
     let userId = order.user_id;
     let businessId = order.business_id;
+    const startedAt = new Date();
+    const expiresAt = new Date(startedAt);
+    expiresAt.setFullYear(expiresAt.getFullYear() + (order.billing_cycle === 'yearly' ? 1 : 0));
+    if (order.billing_cycle !== 'yearly') expiresAt.setMonth(expiresAt.getMonth() + 1);
 
     if (!userId) {
       const password = decryptPassword(order.encrypted_password);
@@ -86,7 +90,8 @@ export async function POST(req: NextRequest) {
           country: order.country_code,
           subscription_plan_id: order.plan_id,
           subscription_status: 'active',
-          subscription_started_at: new Date().toISOString(),
+          subscription_started_at: startedAt.toISOString(),
+          subscription_expires_at: expiresAt.toISOString(),
           status: 'active',
         })
         .select('id')
@@ -113,7 +118,10 @@ export async function POST(req: NextRequest) {
         plan_id: order.plan_id,
         status: 'active',
         billing_cycle: order.billing_cycle,
-        start_date: new Date().toISOString(),
+        start_date: startedAt.toISOString(),
+        end_date: expiresAt.toISOString(),
+        grace_end_date: null,
+        reminder_stage: 0,
       });
 
       await supabase.from('ai_provider_settings').insert({ business_id: businessId }).select().maybeSingle();
