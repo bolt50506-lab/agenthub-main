@@ -235,35 +235,54 @@ export async function POST(req: NextRequest) {
 
     const businessId = whatsappSession.business_id;
 
-    // Reply delivery rule is stored in the WhatsApp integration config so
-    // each business can control text/voice behavior independently.
-    let voiceReplyMode: 'disabled' | 'text_only' | 'voice_only' | 'text_and_voice' | 'random' = 'text_and_voice';
+    if (!businessId) {
+      console.error(
+        '[WhatsApp API] WhatsApp session has no business_id:',
+        whatsappSession.id
+      );
 
-    // Some QR sessions were created before integrations were linked by ID.
-    // Prefer the linked integration, but always fall back to the WhatsApp
-    // integration belonging to the same business.
-    let whatsappIntegration: { config: unknown } | null = null;
+      return NextResponse.json(
+        {
+          success: false,
+          reply: null,
+          error: 'WhatsApp session is not connected to a business',
+        },
+        { status: 500 }
+      );
+    }
+
+    // Reply delivery rule is stored in the WhatsApp integration config.
+    // Prefer the integration explicitly linked to this live QR session.
+    let voiceReplyMode: 'disabled' | 'text_only' | 'voice_only' | 'text_and_voice' | 'random' = 'text_and_voice';
+    let whatsappIntegration: { id?: string; config: unknown } | null = null;
 
     if (whatsappSession.integration_id) {
       const { data } = await supabase
         .from('integrations')
-        .select('config')
+        .select('id, config')
         .eq('id', whatsappSession.integration_id)
         .maybeSingle();
       whatsappIntegration = data;
     }
 
     if (!whatsappIntegration) {
+      // Legacy sessions may not have integration_id. In that case use the
+      // newest WhatsApp integration for this business instead of maybeSingle(),
+      // which can silently return no row when duplicates exist.
       const { data } = await supabase
         .from('integrations')
-        .select('config')
+        .select('id, config')
         .eq('business_id', businessId)
         .eq('type', 'whatsapp')
+        .order('updated_at', { ascending: false })
+        .limit(1)
         .maybeSingle();
       whatsappIntegration = data;
     }
 
-    const configuredMode = (whatsappIntegration?.config as Record<string, unknown> | null)?.voice_reply_mode;
+    const configuredMode =
+      (whatsappIntegration?.config as Record<string, unknown> | null)
+        ?.voice_reply_mode;
 
     if (
       configuredMode === 'disabled' ||
@@ -275,22 +294,13 @@ export async function POST(req: NextRequest) {
       voiceReplyMode = configuredMode;
     }
 
-    if (!businessId) {
-      console.error(
-        '[WhatsApp API] WhatsApp session has no business_id:',
-        whatsappSession.id
-      );
-
-      return NextResponse.json(
-        {
-          success: false,
-          reply: null,
-          error:
-            'WhatsApp session is not connected to a business',
-        },
-        { status: 500 }
-      );
-    }
+    console.log('[WhatsApp API] Voice reply mode resolved:', {
+      session_id: whatsappSession.id,
+      session_integration_id: whatsappSession.integration_id || null,
+      integration_id: whatsappIntegration?.id || null,
+      configured_mode: configuredMode || null,
+      resolved_mode: voiceReplyMode,
+    });
 
     console.log(
       '[WhatsApp API] WhatsApp session found:',
