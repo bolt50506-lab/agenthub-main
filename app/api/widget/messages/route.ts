@@ -39,6 +39,7 @@ export async function GET(req: NextRequest) {
   const businessId = req.nextUrl.searchParams.get('business_id');
   const sessionId = req.nextUrl.searchParams.get('session_id');
   const visitorId = req.nextUrl.searchParams.get('visitor_id');
+  const after = req.nextUrl.searchParams.get('after');
 
   if (!businessId || !sessionId || !visitorId) {
     return NextResponse.json({ error: 'Missing session details' }, { status: 400, headers: CORS });
@@ -59,7 +60,7 @@ export async function GET(req: NextRequest) {
 
   // Only return human/business replies. AI replies are returned directly by POST,
   // which prevents duplicate messages in the widget.
-  const { data: messages, error } = await supabase
+  let query = supabase
     .from('messages')
     .select('id, content, created_at, sender_type, content_type')
     .eq('conversation_id', sessionId)
@@ -67,6 +68,15 @@ export async function GET(req: NextRequest) {
     .eq('sender_type', 'business')
     .order('created_at', { ascending: true })
     .limit(100);
+
+  if (after) {
+    const parsed = new Date(after);
+    if (!Number.isNaN(parsed.getTime())) {
+      query = query.gt('created_at', parsed.toISOString());
+    }
+  }
+
+  const { data: messages, error } = await query;
 
   if (error) {
     return NextResponse.json({ error: 'Failed to load replies' }, { status: 500, headers: CORS });
