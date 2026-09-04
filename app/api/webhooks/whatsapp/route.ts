@@ -276,7 +276,7 @@ export async function POST(req: NextRequest) {
           .select('sender_type, content')
           .eq('conversation_id', conversationId)
           .order('created_at', { ascending: true })
-          .limit(10);
+          .limit(6);
 
         // Load knowledge items for business context
         const { data: knowledgeItems } = await supabase
@@ -285,7 +285,7 @@ export async function POST(req: NextRequest) {
           .eq('business_id', businessId)
           .eq('status', 'active')
           .order('created_at', { ascending: false })
-          .limit(20);
+          .limit(8);
 
         // Load products for business context
         const { data: products } = await supabase
@@ -294,9 +294,9 @@ export async function POST(req: NextRequest) {
           .eq('business_id', businessId)
           .eq('status', 'active')
           .order('created_at', { ascending: false })
-          .limit(20);
+          .limit(8);
 
-        let systemPrompt = `You are ${agentData.name}. Purpose: ${agentData.purpose}. Style: ${agentData.communication_style || 'professional'}. Goal: ${agentData.primary_goal || 'help customers'}.`;
+        let systemPrompt = `You are ${agentData.name}. Purpose: ${agentData.purpose}. Style: ${agentData.communication_style || 'professional'}. Goal: ${agentData.primary_goal || 'help customers'}. Give concise, direct replies suitable for instant messaging. Do not over-explain unless the customer asks for detail.`;
 
         if (knowledgeItems && knowledgeItems.length > 0) {
           const knowledgeText = knowledgeItems
@@ -353,14 +353,14 @@ export async function POST(req: NextRequest) {
             apiUrl: row.base_url || undefined,
             model: row.model,
             temperature: 0.7,
-            maxTokens: settings?.max_response_length ?? 512,
+            maxTokens: Math.min(settings?.max_response_length ?? 512, 180),
           }));
 
           const response = await generateAIResponseWithFallback(
             {
               messages: aiMessages,
               temperature: 0.7,
-              maxTokens: settings?.max_response_length ?? 512,
+              maxTokens: Math.min(settings?.max_response_length ?? 512, 180),
             },
             providerConfigs
           );
