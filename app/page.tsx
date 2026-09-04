@@ -38,17 +38,21 @@ export default function Home() {
   }, [user, profile, loading, router]);
 
   useEffect(() => {
-    supabase.from('subscription_plans').select('*').eq('is_active', true)
-      .order('sort_order', { ascending: true })
-      .then(({ data, error }) => {
-        if (error) console.error('[Pricing] Unable to load subscription plans:', error);
-        setPlans((data as SubscriptionPlan[]) ?? []);
-        setPlansLoaded(true);
+    let active = true;
+    fetch('/api/public/plans', { cache: 'no-store' })
+      .then(async (response) => {
+        const result = await response.json();
+        if (!response.ok) throw new Error(result?.error || 'Unable to load plans');
+        if (active) setPlans((result?.plans as SubscriptionPlan[]) ?? []);
       })
       .catch((error) => {
-        console.error('[Pricing] Unexpected pricing load error:', error);
-        setPlansLoaded(true);
+        console.error('[Pricing] Unable to load public plans:', error);
+        if (active) setPlans([]);
+      })
+      .finally(() => {
+        if (active) setPlansLoaded(true);
       });
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
