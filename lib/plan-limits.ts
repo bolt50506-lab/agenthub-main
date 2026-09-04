@@ -9,7 +9,8 @@ export type PlanLimitType =
   | 'max_knowledge_items'
   | 'max_products'
   | 'max_media_documents'
-  | 'max_integrations';
+  | 'max_integrations'
+  | 'max_voice_clones';
 
 export interface PlanLimitResult {
   allowed: boolean;

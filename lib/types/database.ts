@@ -52,6 +52,9 @@ export type IntegrationType =
 
 export type AIProvider = 'gemini' | 'groq' | 'ollama';
 
+export type VoiceCloneType = 'instant' | 'professional';
+export type VoiceProfileStatus = 'pending' | 'active' | 'verification_required' | 'failed' | 'disabled';
+
 export interface AIProviderConfig {
   id: string;
   provider: AIProvider;
@@ -135,10 +138,45 @@ export interface SubscriptionPlan {
   max_media_documents: number;
   max_integrations: number;
   max_ai_usage_per_month: number | null;
+  max_voice_clones: number;
   max_storage_mb: number | null;
   features: string[];
   is_active: boolean;
   sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VoiceProfile {
+  id: string;
+  business_id: string;
+  name: string;
+  description: string | null;
+  provider: string;
+  provider_voice_id: string;
+  clone_type: VoiceCloneType;
+  status: VoiceProfileStatus;
+  requires_verification: boolean;
+  is_default: boolean;
+  preview_url: string | null;
+  language: string | null;
+  consent_confirmed_at: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VoiceProviderConfig {
+  id: string;
+  provider: string;
+  display_name: string;
+  api_key_encrypted: string | null;
+  base_url: string;
+  model: string;
+  is_enabled: boolean;
+  last_tested_at: string | null;
+  last_test_status: 'success' | 'failure' | null;
+  last_test_message: string | null;
   created_at: string;
   updated_at: string;
 }
