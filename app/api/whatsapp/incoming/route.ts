@@ -115,6 +115,22 @@ export async function POST(req: NextRequest) {
         ? body.message_id.trim()
         : null;
 
+    const inputType =
+      body.input_type === 'voice' ? 'voice' : 'text';
+
+    const transcriptionProvider =
+      typeof body.transcription_provider === 'string' &&
+      body.transcription_provider.trim()
+        ? body.transcription_provider.trim()
+        : null;
+
+    const transcriptionModel =
+      typeof body.transcription_model === 'string' &&
+      body.transcription_model.trim()
+        ? body.transcription_model.trim()
+        : null;
+
+
     console.log('-----------------------------------');
     console.log('[WhatsApp API] Route loaded');
     console.log('[WhatsApp API] Incoming message:', {
@@ -124,6 +140,9 @@ export async function POST(req: NextRequest) {
       pushName,
       phoneNumberFromBody: phoneNumberFromBody || null,
       whatsappMessageId,
+      inputType,
+      transcriptionProvider,
+      transcriptionModel,
     });
     console.log('-----------------------------------');
 
@@ -1245,6 +1264,13 @@ ${JSON.stringify(groupRule?.custom_rules || [])}
           whatsapp_id: from,
           whatsapp_message_id: whatsappMessageId,
           session_id: sessionId,
+          input_type: inputType,
+          ...(inputType === 'voice'
+            ? {
+                transcription_provider: transcriptionProvider,
+                transcription_model: transcriptionModel,
+              }
+            : {}),
         },
       });
 
