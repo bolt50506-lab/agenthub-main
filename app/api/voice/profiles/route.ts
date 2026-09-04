@@ -172,7 +172,7 @@ export async function POST(req: NextRequest) {
     providerForm.set('labels', JSON.stringify({ language: language || 'multilingual', use_case: 'business' }));
 
     for (const file of files) {
-      providerForm.append('files', file, file.name || 'voice-sample');
+      providerForm.append('files[]', file, file.name || 'voice-sample');
     }
 
     const baseUrl = (providerConfig.base_url || 'https://api.elevenlabs.io').replace(/\/$/, '');
