@@ -1,6 +1,11 @@
 (function () {
   'use strict';
 
+  // Remove any older widget instance left behind by a previous script version
+  // or client-side navigation before mounting the current widget.
+  var oldRoot = document.getElementById('agenthub-customer-widget');
+  if (oldRoot) oldRoot.remove();
+
   var currentScript = document.currentScript;
   var params = new URLSearchParams(currentScript && currentScript.src ? currentScript.src.split('?')[1] || '' : '');
   var BUSINESS_ID = params.get('business');
@@ -118,6 +123,7 @@
         if(data.reply) addMessage(data.reply,'agent');
         else if(data.mode==='human') addMessage('Thanks! A team member will reply shortly.','agent');
         else addMessage('I’m having trouble connecting right now. Please try again in a moment.','agent');
+        if(data.reply_created_at){lastReplyAt=data.reply_created_at;localStorage.setItem(REPLY_KEY,lastReplyAt)}
         poll();
       })
       .catch(function(){removeTyping();addMessage('Connection issue. Please try again.','agent');})
