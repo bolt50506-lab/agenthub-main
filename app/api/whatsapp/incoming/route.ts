@@ -431,6 +431,46 @@ export async function POST(req: NextRequest) {
 
     /*
     |--------------------------------------------------------------------------
+    | 2c. Stop automated follow-ups when the customer replies
+    |--------------------------------------------------------------------------
+    */
+
+    if (!isWhatsAppGroup(from)) {
+      const incomingPhone = resolvePhoneNumber(from, phoneNumberFromBody);
+      if (incomingPhone) {
+        const normalizedPhone = incomingPhone.replace(/\\D/g, '');
+        const { data: matchingLeads } = await supabase
+          .from('leads')
+          .select('id')
+          .eq('business_id', businessId)
+          .or(`phone.eq.${incomingPhone},phone_number.eq.${incomingPhone},customer_phone.eq.${incomingPhone}`)
+          .limit(20);
+
+        const leadIds = (matchingLeads || []).map((lead: { id: string }) => lead.id);
+
+        if (leadIds.length > 0) {
+          const { error: cancelError } = await supabase
+            .from('follow_up_tasks')
+            .update({ status: 'cancelled' })
+            .eq('business_id', businessId)
+            .eq('status', 'pending')
+            .eq('automation_generated', true)
+            .in('lead_id', leadIds);
+
+          if (cancelError) {
+            console.error('[WhatsApp API] Failed to cancel pending follow-ups after customer reply:', cancelError);
+          } else {
+            console.log('[WhatsApp API] Cancelled pending automated follow-ups after customer reply:', {
+              phone: normalizedPhone,
+              leads: leadIds.length,
+            });
+          }
+        }
+      }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
     | 3. Determine if this is a WhatsApp group
     |--------------------------------------------------------------------------
     */
