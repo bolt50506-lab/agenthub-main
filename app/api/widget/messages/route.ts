@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
@@ -33,6 +33,54 @@ function isDomainAllowed(refererHost: string, config: Record<string, unknown>): 
   if (!refererHost) return true;
 
   return allowedHosts.some((h) => refererHost === h || refererHost.endsWith('.' + h));
+}
+
+export async function GET(req: NextRequest) {
+  const businessId = req.nextUrl.searchParams.get('business_id');
+  const sessionId = req.nextUrl.searchParams.get('session_id');
+  const visitorId = req.nextUrl.searchParams.get('visitor_id');
+
+  if (!businessId || !sessionId || !visitorId) {
+    return NextResponse.json({ error: 'Missing session details' }, { status: 400, headers: CORS });
+  }
+
+  const supabase = createServiceClient();
+
+  const { data: conversation } = await supabase
+    .from('conversations')
+    .select('id, business_id, customer_id, status')
+    .eq('id', sessionId)
+    .eq('business_id', businessId)
+    .maybeSingle();
+
+  if (!conversation || conversation.status !== 'active' || conversation.customer_id !== visitorId) {
+    return NextResponse.json({ error: 'Session not found' }, { status: 404, headers: CORS });
+  }
+
+  // Only return human/business replies. AI replies are returned directly by POST,
+  // which prevents duplicate messages in the widget.
+  const { data: messages, error } = await supabase
+    .from('messages')
+    .select('id, content, created_at, sender_type, content_type')
+    .eq('conversation_id', sessionId)
+    .eq('business_id', businessId)
+    .eq('sender_type', 'business')
+    .order('created_at', { ascending: true })
+    .limit(100);
+
+  if (error) {
+    return NextResponse.json({ error: 'Failed to load replies' }, { status: 500, headers: CORS });
+  }
+
+  return NextResponse.json({
+    messages: (messages ?? []).map((message) => ({
+      id: message.id,
+      content: message.content,
+      created_at: message.created_at,
+      sender: 'agent',
+      content_type: message.content_type,
+    })),
+  }, { headers: CORS });
 }
 
 export async function POST(req: NextRequest) {
