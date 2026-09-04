@@ -301,26 +301,28 @@ export default function ConversationsPage() {
 
                 <div className="border-t bg-card p-3">
                   {selectedConversation.channel === 'website_chat' ? (
-                    <p className="mb-2 text-[11px] text-muted-foreground">
-                      Team replies are delivered live to the visitor&apos;s open AgentHub website chat.
-                    </p>
+                    <>
+                      <p className="mb-2 text-[11px] text-muted-foreground">
+                        Team replies are delivered live to the visitor&apos;s open AgentHub website chat.
+                      </p>
+                      <div className="flex gap-2">
+                        <Input
+                          value={replyText}
+                          onChange={(e) => setReplyText(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendManualReply(); } }}
+                          placeholder="Type a team reply..."
+                          disabled={sending}
+                        />
+                        <Button onClick={sendManualReply} disabled={!replyText.trim() || sending}>
+                          {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                        </Button>
+                      </div>
+                    </>
                   ) : (
-                    <p className="mb-2 text-[11px] text-muted-foreground">
-                      WhatsApp messages are shown here. Manual WhatsApp sending will follow the connected provider.
+                    <p className="text-[11px] text-muted-foreground">
+                      WhatsApp messages are visible here for monitoring. Manual WhatsApp replies will be enabled through the connected WhatsApp provider service.
                     </p>
                   )}
-                  <div className="flex gap-2">
-                    <Input
-                      value={replyText}
-                      onChange={(e) => setReplyText(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendManualReply(); } }}
-                      placeholder="Type a team reply..."
-                      disabled={sending}
-                    />
-                    <Button onClick={sendManualReply} disabled={!replyText.trim() || sending}>
-                      {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                    </Button>
-                  </div>
                 </div>
               </CardContent>
             </>
