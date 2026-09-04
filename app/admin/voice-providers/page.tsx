@@ -29,14 +29,20 @@ export default function VoiceProvidersPage() {
 
   useEffect(() => {
     (async () => {
-      const { data, error } = await supabase
-        .from('voice_provider_configs')
-        .select('id, provider, display_name, api_key_encrypted, base_url, model, is_enabled')
-        .eq('provider', 'elevenlabs')
-        .maybeSingle();
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch('/api/admin/voice-provider-config', {
+        headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {},
+      });
+      const result = await response.json().catch(() => ({}));
 
-      if (error) toast({ title: 'Unable to load voice provider', description: error.message, variant: 'destructive' });
-      setConfig(data as VoiceProvider | null);
+      if (!response.ok) {
+        toast({ title: 'Unable to load voice provider', description: result.error || 'Please try again', variant: 'destructive' });
+        setLoading(false);
+        return;
+      }
+
+      const provider = (result.providers || []).find((item: VoiceProvider) => item.provider === 'elevenlabs') || null;
+      setConfig(provider);
       setLoading(false);
     })();
   }, [toast]);
