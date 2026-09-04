@@ -40,6 +40,7 @@ export default function VoiceStudioPage() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [language, setLanguage] = useState('');
+  const [referenceText, setReferenceText] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [consent, setConsent] = useState(false);
   const [removeNoise, setRemoveNoise] = useState(false);
@@ -95,6 +96,7 @@ export default function VoiceStudioPage() {
     form.set('name', name.trim());
     form.set('description', description.trim());
     form.set('language', language.trim());
+    form.set('referenceText', referenceText.trim());
     form.set('consent', 'true');
     form.set('removeBackgroundNoise', String(removeNoise));
     files.forEach((file) => form.append('files', file, file.name));
@@ -118,6 +120,7 @@ export default function VoiceStudioPage() {
     setName('');
     setDescription('');
     setLanguage('');
+    setReferenceText('');
     setFiles([]);
     setConsent(false);
     setRemoveNoise(false);
@@ -205,6 +208,17 @@ export default function VoiceStudioPage() {
               <div className="space-y-2">
                 <Label>Description (optional)</Label>
                 <Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Warm, professional voice for sales and customer support" disabled={!canManage || remaining === 0 || creating} />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Exact words spoken in the sample</Label>
+                <Textarea
+                  value={referenceText}
+                  onChange={(e) => setReferenceText(e.target.value)}
+                  placeholder="Paste or type exactly what is spoken in the uploaded recording. This improves Voicebox cloning quality."
+                  disabled={!canManage || remaining === 0 || creating}
+                />
+                <p className="text-xs text-muted-foreground">Recommended for Voicebox: enter the exact transcript of the reference recording.</p>
               </div>
 
               <div className="space-y-2">

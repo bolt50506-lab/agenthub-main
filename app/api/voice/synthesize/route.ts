@@ -52,18 +52,86 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No active cloned voice configured' }, { status: 404 });
   }
 
+  const { data: config } = await supabase
+    .from('voice_provider_configs')
+    .select('api_key_encrypted, base_url, model, is_enabled')
+    .eq('provider', voice.provider)
+    .maybeSingle();
+
+  if (!config?.is_enabled) {
+    return NextResponse.json({ error: 'Voice provider is not configured' }, { status: 503 });
+  }
+
+  if (voice.provider === 'voicebox') {
+    const baseUrl = (config.base_url || '').replace(/\/$/, '');
+    if (!baseUrl) {
+      return NextResponse.json({ error: 'Voicebox server URL is not configured' }, { status: 503 });
+    }
+
+    const generateResponse = await fetch(`${baseUrl}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        profile_id: voice.provider_voice_id,
+        text,
+        language: voice.language || 'en',
+        engine: config.model || undefined,
+      }),
+    });
+
+    const generateRaw = await generateResponse.text();
+    let generation: { id?: string; status?: string; error?: string } = {};
+    try { generation = generateRaw ? JSON.parse(generateRaw) : {}; } catch {}
+
+    if (!generateResponse.ok || !generation.id) {
+      return NextResponse.json(
+        { error: generation.error || 'Voicebox generation failed', details: generateRaw.slice(0, 1000) },
+        { status: 502 }
+      );
+    }
+
+    // Voicebox persists generated audio by generation id. Poll briefly because
+    // model loading/inference may be asynchronous.
+    let audioResponse: Response | null = null;
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      const response = await fetch(`${baseUrl}/audio/${encodeURIComponent(generation.id)}`);
+      if (response.ok) {
+        audioResponse = response;
+        break;
+      }
+
+      const historyResponse = await fetch(`${baseUrl}/history/${encodeURIComponent(generation.id)}`).catch(() => null);
+      if (historyResponse?.ok) {
+        const history = await historyResponse.json().catch(() => null) as { status?: string; error?: string } | null;
+        if (history?.status === 'failed') {
+          return NextResponse.json({ error: history.error || 'Voicebox generation failed' }, { status: 502 });
+        }
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    if (!audioResponse) {
+      return NextResponse.json({ error: 'Voicebox generation timed out waiting for audio' }, { status: 504 });
+    }
+
+    const audio = await audioResponse.arrayBuffer();
+    return new Response(audio, {
+      status: 200,
+      headers: {
+        'Content-Type': audioResponse.headers.get('content-type') || 'audio/wav',
+        'Cache-Control': 'no-store',
+        'X-AgentHub-Voice-Profile': voice.id,
+      },
+    });
+  }
+
   if (voice.provider !== 'elevenlabs') {
     return NextResponse.json({ error: 'Unsupported voice provider' }, { status: 503 });
   }
 
-  const { data: config } = await supabase
-    .from('voice_provider_configs')
-    .select('api_key_encrypted, base_url, model, is_enabled')
-    .eq('provider', 'elevenlabs')
-    .maybeSingle();
-
-  if (!config?.is_enabled || !config.api_key_encrypted) {
-    return NextResponse.json({ error: 'Voice provider is not configured' }, { status: 503 });
+  if (!config.api_key_encrypted) {
+    return NextResponse.json({ error: 'ElevenLabs API key is not configured' }, { status: 503 });
   }
 
   const baseUrl = (config.base_url || 'https://api.elevenlabs.io').replace(/\/$/, '');

@@ -99,6 +99,7 @@ export async function POST(req: NextRequest) {
     const language = String(form.get('language') || '').trim() || null;
     const removeBackgroundNoise = String(form.get('removeBackgroundNoise') || 'false') === 'true';
     const consent = String(form.get('consent') || 'false') === 'true';
+    const referenceText = String(form.get('referenceText') || '').trim();
     const files = form
       .getAll('files')
       .filter((value): value is File => value instanceof File);
@@ -152,17 +153,117 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { data: providerConfig, error: providerError } = await supabase
+    const { data: providerConfigs, error: providerError } = await supabase
       .from('voice_provider_configs')
       .select('provider, api_key_encrypted, base_url, model, is_enabled')
-      .eq('provider', 'elevenlabs')
-      .maybeSingle();
+      .eq('is_enabled', true)
+      .in('provider', ['voicebox', 'elevenlabs']);
 
-    if (providerError || !providerConfig?.is_enabled || !providerConfig.api_key_encrypted) {
+    if (providerError) {
+      return NextResponse.json({ error: providerError.message }, { status: 500 });
+    }
+
+    // Prefer the self-hosted Voicebox provider when the platform admin enables it.
+    const providerConfig = (providerConfigs || []).find((item) => item.provider === 'voicebox')
+      || (providerConfigs || []).find((item) => item.provider === 'elevenlabs');
+
+    if (!providerConfig) {
       return NextResponse.json(
         { error: 'Voice cloning is not configured by the platform administrator' },
         { status: 503 }
       );
+    }
+
+    if (providerConfig.provider === 'voicebox') {
+      const baseUrl = (providerConfig.base_url || '').replace(/\/$/, '');
+      if (!baseUrl) {
+        return NextResponse.json({ error: 'Voicebox server URL is not configured by the platform administrator' }, { status: 503 });
+      }
+
+      // Voicebox requires a profile first, then one or more reference audio samples.
+      const profileResponse = await fetch(
+        `${baseUrl}/profiles`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            description: description || null,
+            language: language || 'en',
+          }),
+        }
+      );
+
+      const profileRaw = await profileResponse.text();
+      let profileData: Record<string, unknown> = {};
+      try { profileData = profileRaw ? JSON.parse(profileRaw) as Record<string, unknown> : {}; } catch { profileData = { raw: profileRaw }; }
+
+      if (!profileResponse.ok || typeof profileData.id !== 'string') {
+        return NextResponse.json({ error: typeof profileData.detail === 'string' ? profileData.detail : 'Voicebox rejected profile creation' }, { status: 502 });
+      }
+
+      const providerVoiceId = profileData.id;
+      try {
+        for (const file of files) {
+          const sampleForm = new FormData();
+          sampleForm.append('file', file, file.name || 'voice-sample');
+          // Exact reference text gives Voicebox the best cloning result. If omitted,
+          // fall back to the voice description/name instead of blocking legacy clients.
+          sampleForm.append('reference_text', referenceText || description || name);
+
+          const sampleResponse = await fetch(
+            `${baseUrl}/profiles/${encodeURIComponent(providerVoiceId)}/samples`,
+            { method: 'POST', body: sampleForm }
+          );
+
+          if (!sampleResponse.ok) {
+            const details = (await sampleResponse.text()).slice(0, 1000);
+            throw new Error(details || 'Voicebox rejected the reference audio sample');
+          }
+        }
+      } catch (sampleError) {
+        await fetch(`${baseUrl}/profiles/${encodeURIComponent(providerVoiceId)}`, { method: 'DELETE' }).catch(() => {});
+        return NextResponse.json({ error: sampleError instanceof Error ? sampleError.message : 'Voicebox rejected the reference audio sample' }, { status: 502 });
+      }
+
+      const { data: existingVoices } = await supabase
+        .from('voice_profiles')
+        .select('id')
+        .eq('business_id', businessId)
+        .neq('status', 'failed')
+        .limit(1);
+
+      const { data: voiceProfile, error: insertError } = await supabase
+        .from('voice_profiles')
+        .insert({
+          business_id: businessId,
+          name,
+          description: description || null,
+          provider: 'voicebox',
+          provider_voice_id: providerVoiceId,
+          clone_type: 'instant',
+          status: 'active',
+          requires_verification: false,
+          is_default: !existingVoices?.length,
+          preview_url: null,
+          language: language || 'en',
+          consent_confirmed_at: new Date().toISOString(),
+          created_by: userId,
+        })
+        .select('id, business_id, name, description, provider, clone_type, status, requires_verification, is_default, preview_url, language, created_at')
+        .single();
+
+      if (insertError) {
+        await fetch(`${baseUrl}/profiles/${encodeURIComponent(providerVoiceId)}`, { method: 'DELETE' }).catch(() => {});
+        const status = /limit reached/i.test(insertError.message) ? 403 : 500;
+        return NextResponse.json({ error: insertError.message }, { status });
+      }
+
+      return NextResponse.json({ success: true, voice: voiceProfile }, { status: 201 });
+    }
+
+    if (!providerConfig.api_key_encrypted) {
+      return NextResponse.json({ error: 'ElevenLabs API key is not configured by the platform administrator' }, { status: 503 });
     }
 
     const providerForm = new FormData();
@@ -231,7 +332,7 @@ export async function POST(req: NextRequest) {
         business_id: businessId,
         name,
         description: description || null,
-        provider: 'elevenlabs',
+        provider: providerConfig.provider,
         provider_voice_id: voiceId,
         clone_type: 'instant',
         status: cloneData.requires_verification === true ? 'verification_required' : 'active',
