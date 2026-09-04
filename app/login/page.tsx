@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Bot, Loader2 } from 'lucide-react';
+import { Bot, Loader2, MessageCircle, Tags } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 export default function LoginPage() {
@@ -100,9 +100,27 @@ export default function LoginPage() {
                 {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                 Sign In
               </Button>
-              <p className="text-sm text-muted-foreground text-center">
-                New to AgentHub? Contact us to get started.
-              </p>
+              <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                <span>New to AgentHub?</span>
+                <a
+                  href="https://wa.me/923407465567"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Contact AgentHub on WhatsApp"
+                  title="Contact us on WhatsApp"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500 text-white transition hover:bg-emerald-600"
+                >
+                  <MessageCircle className="h-4 w-4" />
+                </a>
+                <Link
+                  href="/#pricing"
+                  aria-label="View AgentHub plans"
+                  title="View plans"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-primary transition hover:bg-primary hover:text-primary-foreground"
+                >
+                  <Tags className="h-4 w-4" />
+                </Link>
+              </div>
             </CardFooter>
           </form>
         </Card>
