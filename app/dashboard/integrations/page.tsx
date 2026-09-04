@@ -223,6 +223,7 @@ export default function IntegrationsPage() {
     };
 
     let error: { message: string } | null = null;
+    let savedIntegrationId: string | null = null;
 
     if (integration) {
       const result = await supabase
@@ -233,6 +234,7 @@ export default function IntegrationsPage() {
         .maybeSingle();
       error = result.error;
       if (!result.error && result.data) {
+        savedIntegrationId = String(result.data.id);
         setIntegrations((current) =>
           current.map((item) => item.id === integration.id ? (result.data as Integration) : item)
         );
@@ -254,6 +256,7 @@ export default function IntegrationsPage() {
         .maybeSingle();
       error = result.error;
       if (!result.error && result.data) {
+        savedIntegrationId = String(result.data.id);
         setIntegrations((current) => [...current, result.data as Integration]);
       }
     }
@@ -263,6 +266,22 @@ export default function IntegrationsPage() {
     if (error) {
       toast({ title: 'Failed to save reply mode', description: error.message, variant: 'destructive' });
       return;
+    }
+
+    // Bind existing QR sessions to the exact integration that was just saved.
+    // This removes ambiguity when an older business has more than one WhatsApp
+    // integration row and guarantees incoming messages read the same rule the
+    // dashboard is displaying.
+    if (savedIntegrationId) {
+      const { error: linkError } = await supabase
+        .from('whatsapp_sessions')
+        .update({ integration_id: savedIntegrationId })
+        .eq('business_id', activeBusiness.id)
+        .eq('connection_method', 'qr_code');
+
+      if (linkError) {
+        console.warn('WhatsApp reply rule saved but QR session link failed:', linkError.message);
+      }
     }
 
     toast({
