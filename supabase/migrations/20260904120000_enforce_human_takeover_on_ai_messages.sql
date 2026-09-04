@@ -34,3 +34,7 @@ CREATE TRIGGER trg_block_ai_messages_during_human_takeover
 BEFORE INSERT ON public.messages
 FOR EACH ROW
 EXECUTE FUNCTION public.block_ai_messages_during_human_takeover();
+
+REVOKE EXECUTE ON FUNCTION public.block_ai_messages_during_human_takeover() FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.block_ai_messages_during_human_takeover() FROM anon;
+REVOKE EXECUTE ON FUNCTION public.block_ai_messages_during_human_takeover() FROM authenticated;
