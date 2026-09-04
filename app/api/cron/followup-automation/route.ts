@@ -8,20 +8,51 @@ function authorized(req: NextRequest) {
   return Boolean(secret) && req.headers.get('authorization') === `Bearer ${secret}`;
 }
 
-async function sendThroughAgentHub(task: any, lead: any) {
+async function sendThroughAgentHub(supabase: any, task: any, lead: any) {
   const base = process.env.WHATSAPP_AGENT_URL;
   const token = process.env.WHATSAPP_AGENT_TOKEN;
   if (task.channel !== 'whatsapp') throw new Error('Automated delivery for this channel is not connected yet');
   if (!base) throw new Error('WHATSAPP_AGENT_URL is not configured');
-  const phone = lead?.phone || lead?.phone_number || lead?.customer_phone;
+
+  const phone = String(lead?.phone || lead?.phone_number || lead?.customer_phone || '').replace(/\D/g, '');
   if (!phone) throw new Error('Lead has no phone number for WhatsApp follow-up');
-  const response = await fetch(base.replace(/\/$/, '') + '/send-message', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}) },
-    body: JSON.stringify({ phoneNumber: phone, message: task.notes || 'Hi! Just following up to see if you need any help. 😊', businessId: task.business_id, followUpTaskId: task.id }),
-  });
-  if (!response.ok) throw new Error('WhatsApp agent rejected follow-up: ' + response.status + ' ' + await response.text());
-  return response.json().catch(() => ({ success: true }));
+
+  const { data: session, error: sessionError } = await supabase
+    .from('whatsapp_sessions')
+    .select('session_id,status')
+    .eq('business_id', task.business_id)
+    .eq('status', 'connected')
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (sessionError) throw new Error('Could not resolve connected WhatsApp session: ' + sessionError.message);
+  if (!session?.session_id) throw new Error('No connected WhatsApp session found for this business');
+
+  const response = await fetch(
+    base.replace(/\/$/, '') + '/sessions/' + encodeURIComponent(session.session_id) + '/send',
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(token ? { authorization: 'Bearer ' + token } : {}),
+      },
+      body: JSON.stringify({
+        to: phone + '@s.whatsapp.net',
+        message: task.notes || 'Hi! Just following up to see if you need any help. 😊',
+      }),
+    }
+  );
+
+  const raw = await response.text();
+  let data: any = null;
+  try { data = raw ? JSON.parse(raw) : null; } catch {}
+
+  if (!response.ok || data?.success === false) {
+    throw new Error('WhatsApp agent rejected follow-up: ' + response.status + ' ' + (data?.message || raw));
+  }
+
+  return data || { success: true };
 }
 
 export async function GET(req: NextRequest) {
@@ -55,7 +86,7 @@ export async function GET(req: NextRequest) {
         continue;
       }
 
-      const delivery = await sendThroughAgentHub(task, lead);
+      const delivery = await sendThroughAgentHub(supabase, task, lead);
       if (delivery && delivery.success === false) throw new Error(delivery.error || 'WhatsApp follow-up send failed');
 
       await supabase.from('follow_up_history').insert({
