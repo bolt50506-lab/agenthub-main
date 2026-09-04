@@ -239,24 +239,40 @@ export async function POST(req: NextRequest) {
     // each business can control text/voice behavior independently.
     let voiceReplyMode: 'disabled' | 'text_only' | 'voice_only' | 'text_and_voice' | 'random' = 'text_and_voice';
 
+    // Some QR sessions were created before integrations were linked by ID.
+    // Prefer the linked integration, but always fall back to the WhatsApp
+    // integration belonging to the same business.
+    let whatsappIntegration: { config: unknown } | null = null;
+
     if (whatsappSession.integration_id) {
-      const { data: whatsappIntegration } = await supabase
+      const { data } = await supabase
         .from('integrations')
         .select('config')
         .eq('id', whatsappSession.integration_id)
         .maybeSingle();
+      whatsappIntegration = data;
+    }
 
-      const configuredMode = (whatsappIntegration?.config as Record<string, unknown> | null)?.voice_reply_mode;
+    if (!whatsappIntegration) {
+      const { data } = await supabase
+        .from('integrations')
+        .select('config')
+        .eq('business_id', businessId)
+        .eq('type', 'whatsapp')
+        .maybeSingle();
+      whatsappIntegration = data;
+    }
 
-      if (
-        configuredMode === 'disabled' ||
-        configuredMode === 'text_only' ||
-        configuredMode === 'voice_only' ||
-        configuredMode === 'text_and_voice' ||
-        configuredMode === 'random'
-      ) {
-        voiceReplyMode = configuredMode;
-      }
+    const configuredMode = (whatsappIntegration?.config as Record<string, unknown> | null)?.voice_reply_mode;
+
+    if (
+      configuredMode === 'disabled' ||
+      configuredMode === 'text_only' ||
+      configuredMode === 'voice_only' ||
+      configuredMode === 'text_and_voice' ||
+      configuredMode === 'random'
+    ) {
+      voiceReplyMode = configuredMode;
     }
 
     if (!businessId) {
