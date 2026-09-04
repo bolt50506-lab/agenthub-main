@@ -36,7 +36,7 @@ export default function ConversationsPage() {
       .order('created_at', { ascending: false });
 
     const rows = (convData as Conversation[]) ?? [];
-    const customerIds = [...new Set(rows.map((c) => c.customer_id).filter(Boolean))] as string[];
+    const customerIds = Array.from(new Set(rows.map((c) => c.customer_id).filter((id): id is string => Boolean(id))));
 
     let customerMap = new Map<string, Customer>();
     if (customerIds.length) {
