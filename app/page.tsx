@@ -7,7 +7,7 @@ import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { MessageSquare, Zap, Shield, Bot, ArrowRight, Check, Phone, MessageCircle, Sparkles, Globe2, CalendarDays, BarChart3, CirclePlay, Send } from 'lucide-react';
+import { MessageSquare, Shield, Bot, ArrowRight, Check, Phone, MessageCircle, Sparkles, CirclePlay, Send } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import type { SubscriptionPlan } from '@/lib/types/database';
 
