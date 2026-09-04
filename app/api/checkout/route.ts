@@ -29,6 +29,8 @@ export async function POST(req: NextRequest) {
     const businessName = String(body.businessName || '').trim();
     const password = String(body.password || '');
     const countryCode = String(body.countryCode || 'PK').toUpperCase();
+    const paymentMethod = String(body.paymentMethod || 'jazzcash');
+    const billingCycle = body.billingCycle === 'yearly' ? 'yearly' : 'monthly';
 
     if (!planSlug || !customerName || !customerEmail || !businessName || password.length < 8) {
       return NextResponse.json({ error: 'Please complete all checkout fields. Password must be at least 8 characters.' }, { status: 400 });
@@ -46,7 +48,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Selected plan is no longer available.' }, { status: 404 });
     }
 
-    const amountCents = Number(plan.price_cents);
+    const monthlyCents = Number(plan.price_cents);
+    const discount = plan.slug === 'enterprise' ? 10 : plan.slug === 'starter' ? 4 : 7;
+    const amountCents = billingCycle === 'yearly'
+      ? Math.round(monthlyCents * 12 * (1 - discount / 100))
+      : monthlyCents;
     if (!Number.isFinite(amountCents) || amountCents <= 0) {
       return NextResponse.json({ error: 'This plan does not have a valid checkout price.' }, { status: 400 });
     }
@@ -66,7 +72,7 @@ export async function POST(req: NextRequest) {
       .insert({
         order_number: orderNumber,
         plan_id: plan.id,
-        billing_cycle: plan.billing_period === 'yearly' ? 'yearly' : 'monthly',
+        billing_cycle: billingCycle,
         customer_name: customerName,
         customer_email: customerEmail,
         business_name: businessName,
@@ -75,7 +81,7 @@ export async function POST(req: NextRequest) {
         currency: 'USD',
         amount_cents: amountCents,
         status: 'pending',
-        gateway: 'paynicorn',
+        gateway: paymentMethod,
       })
       .select('id')
       .single();
