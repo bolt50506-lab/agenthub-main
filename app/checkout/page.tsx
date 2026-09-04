@@ -8,7 +8,6 @@ import { Bot, Check, LockKeyhole, Loader2, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { supabase } from '@/lib/supabase/client';
 import type { SubscriptionPlan } from '@/lib/types/database';
 
 export default function CheckoutPage() {
@@ -27,13 +26,27 @@ export default function CheckoutPage() {
   const [paymentMethod, setPaymentMethod] = useState('jazzcash');
 
   useEffect(() => {
-    supabase.from('subscription_plans').select('*').eq('is_active', true).order('sort_order', { ascending: true })
-      .then(({ data }) => {
-        const rows = (data as SubscriptionPlan[]) ?? [];
+    let active = true;
+    fetch('/api/public/plans', { cache: 'no-store' })
+      .then(async (response) => {
+        const result = await response.json();
+        if (!response.ok) throw new Error(result?.error || 'Unable to load plans');
+        const rows = (result?.plans as SubscriptionPlan[]) ?? [];
+        if (!active) return;
         setPlans(rows);
         setPlan(rows.find((item) => item.slug === selectedSlug) || rows[0] || null);
-        setLoading(false);
+      })
+      .catch((error) => {
+        console.error('[Checkout] Unable to load plans:', error);
+        if (active) {
+          setPlans([]);
+          setPlan(null);
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
       });
+    return () => { active = false; };
   }, [selectedSlug]);
 
   async function startCheckout(event: FormEvent) {
