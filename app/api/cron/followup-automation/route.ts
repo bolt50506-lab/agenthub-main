@@ -81,9 +81,41 @@ export async function GET(req: NextRequest) {
         ? await supabase.from('leads').select('*').eq('id', task.lead_id).maybeSingle()
         : { data: null };
 
-      if (lead && ['won','lost'].includes(lead.status)) {
-        await supabase.from('follow_up_tasks').update({ status: 'cancelled' }).eq('id', task.id);
+      const { data: automationSettings } = await supabase
+        .from('followup_automation_settings')
+        .select('enabled, stop_on_customer_reply, stop_on_won')
+        .eq('business_id', task.business_id)
+        .maybeSingle();
+
+      if (!automationSettings?.enabled) {
+        await supabase.from('follow_up_tasks').update({ status: 'cancelled', last_error: 'Automation disabled' }).eq('id', task.id);
         continue;
+      }
+
+      if (lead && automationSettings.stop_on_won && ['won', 'lost'].includes(lead.status)) {
+        await supabase.from('follow_up_tasks').update({ status: 'cancelled', last_error: null }).eq('id', task.id);
+        continue;
+      }
+
+      if (lead && automationSettings.stop_on_customer_reply && lead.conversation_id) {
+        const { data: customerReply } = await supabase
+          .from('messages')
+          .select('id')
+          .eq('conversation_id', lead.conversation_id)
+          .eq('sender_type', 'customer')
+          .gt('created_at', lead.created_at)
+          .limit(1)
+          .maybeSingle();
+
+        if (customerReply) {
+          await supabase
+            .from('follow_up_tasks')
+            .update({ status: 'cancelled', last_error: null })
+            .eq('lead_id', lead.id)
+            .eq('automation_generated', true)
+            .eq('status', 'pending');
+          continue;
+        }
       }
 
       const delivery = await sendThroughAgentHub(supabase, task, lead);
