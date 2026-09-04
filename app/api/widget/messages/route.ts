@@ -97,6 +97,12 @@ export async function POST(req: NextRequest) {
   };
 
   const cleanMessage = message?.trim();
+  const TWO_MINUTES_MS = 2 * 60 * 1000;
+  const takeoverExpired = (row: { human_takeover?: boolean | null; human_takeover_at?: string | null; ai_resume_at?: string | null } | null | undefined) => {
+    if (!row?.human_takeover) return false;
+    const deadline = row.ai_resume_at || (row.human_takeover_at ? new Date(new Date(row.human_takeover_at).getTime() + TWO_MINUTES_MS).toISOString() : null);
+    return !!deadline && new Date(deadline).getTime() <= Date.now();
+  };
   if (!business_id || !cleanMessage) {
     return NextResponse.json({ error: 'Missing business_id or message' }, { status: 400, headers: CORS });
   }
@@ -191,12 +197,20 @@ export async function POST(req: NextRequest) {
   // Human takeover always wins over AI.
   let { data: conv } = await supabase
     .from('conversations')
-    .select('agent_id, ai_enabled, human_takeover')
+    .select('agent_id, ai_enabled, human_takeover, human_takeover_at, ai_resume_at')
     .eq('id', conversationId)
     .eq('business_id', business_id)
     .maybeSingle();
 
   if (!conv) return NextResponse.json({ error: 'Conversation not found' }, { status: 404, headers: CORS });
+
+  // A human takeover is temporary. If the two-minute window has elapsed,
+  // resume AI before handling the next customer message. This is also backed
+  // by a database trigger so the same behavior applies to every channel.
+  if (takeoverExpired(conv)) {
+    await supabase.from('conversations').update({ human_takeover: false, ai_enabled: true, ai_resume_at: null }).eq('id', conversationId).eq('business_id', business_id);
+    conv = { ...conv, human_takeover: false, ai_enabled: true, ai_resume_at: null };
+  }
 
   // Browser retries and old widgets can POST the same text more than once.
   // Treat an identical customer message received in the last 15 seconds as
@@ -285,12 +299,17 @@ export async function POST(req: NextRequest) {
   // AI before generation begins.
   const { data: currentConv } = await supabase
     .from('conversations')
-    .select('agent_id, ai_enabled, human_takeover')
+    .select('agent_id, ai_enabled, human_takeover, human_takeover_at, ai_resume_at')
     .eq('id', conversationId)
     .eq('business_id', business_id)
     .maybeSingle();
 
   conv = currentConv ?? conv;
+
+  if (takeoverExpired(conv)) {
+    await supabase.from('conversations').update({ human_takeover: false, ai_enabled: true, ai_resume_at: null }).eq('id', conversationId).eq('business_id', business_id);
+    conv = { ...conv, human_takeover: false, ai_enabled: true, ai_resume_at: null };
+  }
 
   if (!conv?.ai_enabled || conv.human_takeover) {
     await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversationId);
@@ -402,12 +421,12 @@ export async function POST(req: NextRequest) {
   // was generating. Re-read the conversation immediately before persistence.
   const { data: beforeReply } = await supabase
     .from('conversations')
-    .select('human_takeover, ai_enabled')
+    .select('human_takeover, ai_enabled, human_takeover_at, ai_resume_at')
     .eq('id', conversationId)
     .eq('business_id', business_id)
     .maybeSingle();
 
-  if (!beforeReply?.ai_enabled || beforeReply.human_takeover) {
+  if (!beforeReply?.ai_enabled || (beforeReply.human_takeover && !takeoverExpired(beforeReply))) {
     await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversationId);
     return NextResponse.json({ session_id: conversationId, visitor_id: customerId, reply: '', mode: 'human' }, { headers: CORS });
   }
