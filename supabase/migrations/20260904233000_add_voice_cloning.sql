@@ -12,6 +12,15 @@ SET max_voice_clones = CASE slug
 END
 WHERE slug IN ('starter', 'professional', 'enterprise');
 
+UPDATE subscription_plans
+SET features = CASE slug
+  WHEN 'starter' THEN to_jsonb(ARRAY['1 AI Agent','500 conversations/month','2 team members','500 MB storage','Email support','Basic analytics','1 cloned AI voice'])
+  WHEN 'professional' THEN to_jsonb(ARRAY['5 AI Agents','5,000 conversations/month','10 team members','5 GB storage','Priority support','Advanced analytics','Custom agent training','Group AI rules','Image analysis','2 cloned AI voices'])
+  WHEN 'enterprise' THEN to_jsonb(ARRAY['Unlimited AI Agents','Unlimited conversations','Unlimited team members','Unlimited storage','24/7 phone support','Custom integrations','Dedicated account manager','SLA guarantee','On-premise deployment option','Custom AI model training','4 cloned AI voices'])
+  ELSE features
+END
+WHERE slug IN ('starter', 'professional', 'enterprise');
+
 CREATE TABLE IF NOT EXISTS voice_provider_configs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   provider text NOT NULL UNIQUE,
