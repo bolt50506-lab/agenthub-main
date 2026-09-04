@@ -24,6 +24,7 @@ export default function CheckoutPage() {
   const [businessName, setBusinessName] = useState('');
   const [password, setPassword] = useState('');
   const [countryCode, setCountryCode] = useState('PK');
+  const [paymentMethod, setPaymentMethod] = useState('jazzcash');
 
   useEffect(() => {
     supabase.from('subscription_plans').select('*').eq('is_active', true).order('sort_order', { ascending: true })
@@ -52,6 +53,7 @@ export default function CheckoutPage() {
           businessName,
           password,
           countryCode,
+          paymentMethod,
         }),
       });
       const result = await response.json();
@@ -87,7 +89,8 @@ export default function CheckoutPage() {
             <div><Label className="text-slate-300">Email address</Label><Input required type="email" value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)} className="mt-2 border-white/10 bg-white/[0.04] text-white" placeholder="you@business.com" /></div>
             <div><Label className="text-slate-300">Choose account password</Label><Input required minLength={8} type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-2 border-white/10 bg-white/[0.04] text-white" placeholder="Minimum 8 characters" /><p className="mt-2 text-xs text-slate-500">This password is encrypted for the pending checkout and used only to create your account after successful payment.</p></div>
             <div><Label className="text-slate-300">Country</Label><select value={countryCode} onChange={(e) => setCountryCode(e.target.value)} className="mt-2 h-10 w-full rounded-md border border-white/10 bg-[#10172a] px-3 text-sm text-white"><option value="PK">Pakistan</option><option value="US">United States</option><option value="AE">United Arab Emirates</option><option value="SA">Saudi Arabia</option><option value="GB">United Kingdom</option><option value="EU">European Union</option><option value="ID">Indonesia</option><option value="MY">Malaysia</option><option value="PH">Philippines</option><option value="BD">Bangladesh</option></select></div>
-            {error && <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">{error}</div>}
+            <div><Label className="text-slate-300">Payment method</Label><div className="mt-2 grid gap-2 sm:grid-cols-3">{[['jazzcash','JazzCash'],['easypaisa','Easypaisa'],['bank_transfer','Bank Transfer']].map(([value,label]) => <button key={value} type="button" onClick={() => setPaymentMethod(value)} className={`rounded-xl border px-3 py-3 text-sm font-medium transition ${paymentMethod===value ? 'border-violet-400 bg-violet-500/20 text-white' : 'border-white/10 bg-white/[0.03] text-slate-300 hover:border-white/25'}`}>{label}</button>)}</div><p className="mt-2 text-xs text-slate-500">Choose your preferred Pakistani payment method. Payment details are shown at checkout.</p></div>
+                        {error && <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">{error}</div>}
             <Button type="submit" disabled={submitting} className="h-12 w-full rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500">{submitting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Opening secure checkout...</> : <>Continue to payment <LockKeyhole className="ml-2 h-4 w-4" /></>}</Button>
           </form>
         </section>
