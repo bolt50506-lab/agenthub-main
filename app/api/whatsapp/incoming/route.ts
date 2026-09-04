@@ -237,7 +237,7 @@ export async function POST(req: NextRequest) {
 
     // Reply delivery rule is stored in the WhatsApp integration config so
     // each business can control text/voice behavior independently.
-    let voiceReplyMode: 'text_only' | 'voice_only' | 'text_and_voice' | 'random' = 'text_and_voice';
+    let voiceReplyMode: 'disabled' | 'text_only' | 'voice_only' | 'text_and_voice' | 'random' = 'text_and_voice';
 
     if (whatsappSession.integration_id) {
       const { data: whatsappIntegration } = await supabase
@@ -249,6 +249,7 @@ export async function POST(req: NextRequest) {
       const configuredMode = (whatsappIntegration?.config as Record<string, unknown> | null)?.voice_reply_mode;
 
       if (
+        configuredMode === 'disabled' ||
         configuredMode === 'text_only' ||
         configuredMode === 'voice_only' ||
         configuredMode === 'text_and_voice' ||
