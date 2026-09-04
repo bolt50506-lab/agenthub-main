@@ -175,7 +175,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (providerConfig.provider === 'voicebox') {
-      const baseUrl = (providerConfig.base_url || '').replace(/\\/$/, '');
+      const baseUrl = (providerConfig.base_url || '').replace(/\/$/, '');
       if (!baseUrl) {
         return NextResponse.json({ error: 'Voicebox server URL is not configured by the platform administrator' }, { status: 503 });
       }
