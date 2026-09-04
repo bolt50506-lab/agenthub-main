@@ -324,7 +324,7 @@ export async function POST(req: NextRequest) {
           .from('messages')
           .select('sender_type, content')
           .eq('conversation_id', conversationId)
-          .order('created_at', { ascending: true })
+          .order('created_at', { ascending: false })
           .limit(12);
         const { data: knowledgeItems } = await supabase
           .from('knowledge_items')
@@ -356,7 +356,7 @@ export async function POST(req: NextRequest) {
 
         const aiMessages = [
           { role: 'system' as const, content: systemPrompt },
-          ...(prevMessages ?? []).map((m) => ({
+          ...(prevMessages ?? []).slice().reverse().map((m) => ({
             role: m.sender_type === 'customer' ? 'user' as const : 'assistant' as const,
             content: m.content,
           })),
