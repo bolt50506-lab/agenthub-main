@@ -380,6 +380,19 @@ export async function POST(req: NextRequest) {
       }
     );
 
+    // Resolve the business default cloned voice once for this reply. The
+    // Railway WhatsApp service uses this flag to request secure synthesis
+    // from AgentHub; provider API keys never leave the backend.
+    const { data: defaultVoiceProfile } = await supabase
+      .from('voice_profiles')
+      .select('id')
+      .eq('business_id', businessId)
+      .eq('is_default', true)
+      .eq('status', 'active')
+      .maybeSingle();
+
+    const voiceCloneEnabled = !!defaultVoiceProfile?.id;
+
     /*
     |--------------------------------------------------------------------------
     | 2b. Duplicate message protection
@@ -2126,6 +2139,8 @@ STRICT RULES:
       reply: finalReply,
       voice_reply: voiceReply,
       voice_reply_mode: voiceReplyMode,
+      voice_clone_enabled: voiceCloneEnabled,
+      voice_profile_id: defaultVoiceProfile?.id || null,
       provider: aiResponse.provider,
       model: aiResponse.model,
       appointment_id: bookedAppointmentId,
