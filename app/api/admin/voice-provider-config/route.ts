@@ -21,6 +21,7 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json() as {
     configId?: string;
+    provider?: string;
     apiKey?: string;
     baseUrl?: string;
     model?: string;
@@ -30,14 +31,25 @@ export async function POST(req: NextRequest) {
 
   if (!body.configId) return NextResponse.json({ error: 'Missing configId' }, { status: 400 });
 
+  const { data: existing, error: existingError } = await supabase
+    .from('voice_provider_configs')
+    .select('provider')
+    .eq('id', body.configId)
+    .maybeSingle();
+
+  if (existingError || !existing) {
+    return NextResponse.json({ error: existingError?.message || 'Voice provider configuration not found' }, { status: 404 });
+  }
+
+  const isVoicebox = existing.provider === 'voicebox';
   const update: Record<string, unknown> = {
-    base_url: body.baseUrl || 'https://api.elevenlabs.io',
-    model: body.model || 'eleven_flash_v2_5',
-    display_name: body.displayName || 'ElevenLabs',
+    base_url: body.baseUrl?.trim() || (isVoicebox ? '' : 'https://api.elevenlabs.io'),
+    model: body.model?.trim() || (isVoicebox ? 'chatterbox' : 'eleven_flash_v2_5'),
+    display_name: body.displayName?.trim() || (isVoicebox ? 'Voicebox' : 'ElevenLabs'),
     is_enabled: body.isEnabled === true,
   };
 
-  if (body.apiKey?.trim()) update.api_key_encrypted = body.apiKey.trim();
+  if (body.apiKey?.trim() && !isVoicebox) update.api_key_encrypted = body.apiKey.trim();
 
   const { error } = await supabase
     .from('voice_provider_configs')
