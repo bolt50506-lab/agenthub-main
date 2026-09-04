@@ -188,20 +188,59 @@ export default function IntegrationsPage() {
   };
 
   const handleSaveVoiceMode = async () => {
-    const integration = getIntegration('whatsapp');
-    if (!integration) {
-      toast({ title: 'WhatsApp not configured', description: 'Configure WhatsApp first.', variant: 'destructive' });
+    if (!activeBusiness) {
+      toast({ title: 'No business selected', description: 'Select a business before saving the WhatsApp reply rule.', variant: 'destructive' });
       return;
     }
+
+    const integration = getIntegration('whatsapp');
     setSavingVoiceMode(true);
-    const config = { ...((integration.config ?? {}) as Record<string, unknown>), voice_reply_mode: voiceReplyMode };
-    const { error } = await supabase.from('integrations').update({ config }).eq('id', integration.id);
+
+    const config = {
+      ...((integration?.config ?? {}) as Record<string, unknown>),
+      voice_reply_mode: voiceReplyMode,
+    };
+
+    let error: { message: string } | null = null;
+
+    if (integration) {
+      const result = await supabase
+        .from('integrations')
+        .update({ config })
+        .eq('id', integration.id);
+      error = result.error;
+    } else {
+      // QR-connected businesses may have a whatsapp_sessions row without an
+      // integrations row. Create the integration automatically so the rule
+      // can always be saved from this dashboard.
+      const result = await supabase
+        .from('integrations')
+        .insert({
+          business_id: activeBusiness.id,
+          type: 'whatsapp',
+          name: 'WhatsApp',
+          status: 'connected',
+          config,
+        });
+      error = result.error;
+    }
+
     setSavingVoiceMode(false);
+
     if (error) {
       toast({ title: 'Failed to save reply mode', description: error.message, variant: 'destructive' });
       return;
     }
-    toast({ title: 'Reply mode saved', description: voiceReplyMode === 'random' ? 'Some replies will be text and some voice.' : `WhatsApp reply mode set to ${voiceReplyMode.replaceAll('_', ' ')}.` });
+
+    toast({
+      title: 'Reply mode saved',
+      description: voiceReplyMode === 'disabled'
+        ? 'Voice replies are disabled. Customers will receive text replies only.'
+        : voiceReplyMode === 'random'
+          ? 'Some replies will be text and some voice.'
+          : `WhatsApp reply mode set to ${voiceReplyMode.replaceAll('_', ' ')}.`,
+    });
+
     await loadIntegrations();
   };
 
