@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/sheet';
 import {
   LayoutDashboard, Bot, MessageSquare, Users, Calendar, CheckSquare,
-  BookOpen, Package, Image, Plug, UserCog, BarChart3, Settings,
+  BookOpen, Package, Image, Plug, UserCog, BarChart3, Settings, Zap,
   Menu, LogOut, ChevronDown, Building, Shield, Moon, Sun, Bell, AlertCircle,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
@@ -36,6 +36,7 @@ const NAV_ITEMS = [
   { href: '/dashboard/leads', label: 'Leads', icon: Users },
   { href: '/dashboard/appointments', label: 'Appointments', icon: Calendar },
   { href: '/dashboard/follow-ups', label: 'Follow-ups', icon: CheckSquare },
+  { href: '/dashboard/follow-up-automation', label: 'Follow-up Automation', icon: Zap },
   { href: '/dashboard/knowledge', label: 'Knowledge Base', icon: BookOpen },
   { href: '/dashboard/products', label: 'Products & Services', icon: Package },
   { href: '/dashboard/media', label: 'Media & Documents', icon: Image },
