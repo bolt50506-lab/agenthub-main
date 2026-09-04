@@ -4,7 +4,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Bot, Check, Globe2, LockKeyhole, Loader2, ArrowLeft, MessageCircle } from 'lucide-react';
+import { Bot, Check, LockKeyhole, Loader2, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -86,7 +86,7 @@ export default function CheckoutPage() {
             </div>
             <div><Label className="text-slate-300">Email address</Label><Input required type="email" value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)} className="mt-2 border-white/10 bg-white/[0.04] text-white" placeholder="you@business.com" /></div>
             <div><Label className="text-slate-300">Choose account password</Label><Input required minLength={8} type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-2 border-white/10 bg-white/[0.04] text-white" placeholder="Minimum 8 characters" /><p className="mt-2 text-xs text-slate-500">This password is encrypted for the pending checkout and used only to create your account after successful payment.</p></div>
-            <div><Label className="text-slate-300">Where are you paying from?</Label><select value={countryCode} onChange={(e) => setCountryCode(e.target.value)} className="mt-2 h-10 w-full rounded-md border border-white/10 bg-[#10172a] px-3 text-sm text-white"><option value="PK">Pakistan — local payment methods</option><option value="US">United States</option><option value="AE">United Arab Emirates</option><option value="SA">Saudi Arabia</option><option value="GB">United Kingdom</option><option value="EU">European Union</option><option value="ID">Indonesia</option><option value="MY">Malaysia</option><option value="PH">Philippines</option><option value="BD">Bangladesh</option></select></div>
+            <div><Label className="text-slate-300">Country</Label><select value={countryCode} onChange={(e) => setCountryCode(e.target.value)} className="mt-2 h-10 w-full rounded-md border border-white/10 bg-[#10172a] px-3 text-sm text-white"><option value="PK">Pakistan</option><option value="US">United States</option><option value="AE">United Arab Emirates</option><option value="SA">Saudi Arabia</option><option value="GB">United Kingdom</option><option value="EU">European Union</option><option value="ID">Indonesia</option><option value="MY">Malaysia</option><option value="PH">Philippines</option><option value="BD">Bangladesh</option></select></div>
             {error && <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">{error}</div>}
             <Button type="submit" disabled={submitting} className="h-12 w-full rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500">{submitting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Opening secure checkout...</> : <>Continue to payment <LockKeyhole className="ml-2 h-4 w-4" /></>}</Button>
           </form>
@@ -99,7 +99,7 @@ export default function CheckoutPage() {
             <p className="mt-3 text-sm leading-6 text-slate-400">{plan.description || 'AI automation for customer conversations.'}</p>
             <div className="mt-6 flex items-end gap-1 border-b border-white/10 pb-6"><span className="text-5xl font-bold">${price}</span><span className="mb-2 text-sm text-slate-500">/{plan.billing_period}</span></div>
             <ul className="mt-6 space-y-3">{plan.features.map((feature) => <li key={feature} className="flex gap-2 text-sm text-slate-300"><Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />{feature}</li>)}</ul>
-            <div className="mt-6 rounded-xl border border-white/10 bg-black/10 p-4 text-xs text-slate-400"><div className="flex gap-2"><Globe2 className="h-4 w-4 text-cyan-300" /><span>International checkout uses the configured global payment gateway and country-specific methods.</span></div><div className="mt-3 flex gap-2"><MessageCircle className="h-4 w-4 text-emerald-300" /><span>Pakistan checkout is configured for supported local payment methods.</span></div></div>
+            <div className="mt-6 rounded-xl border border-violet-400/15 bg-violet-500/[0.05] p-4 text-xs text-slate-300">Your selected plan will be activated automatically after successful payment confirmation.</div>
           </div>
         </aside>
       </div>
