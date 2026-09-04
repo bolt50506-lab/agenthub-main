@@ -160,8 +160,29 @@ export default function IntegrationsPage() {
       .order('created_at', { ascending: true });
     if (error) {
       toast({ title: 'Failed to load integrations', description: error.message, variant: 'destructive' });
+      setLoading(false);
+      return;
     }
-    setIntegrations((data as Integration[]) ?? []);
+
+    const loaded = (data as Integration[]) ?? [];
+    setIntegrations(loaded);
+
+    // Restore the saved WhatsApp reply rule after every reload. Previously
+    // the selector state always started as text_and_voice, so a successful
+    // save could look like it was reverted immediately after refresh.
+    const whatsappIntegration = loaded.find((item) => item.type === 'whatsapp');
+    const savedMode = (whatsappIntegration?.config as Record<string, unknown> | undefined)?.voice_reply_mode;
+
+    if (
+      savedMode === 'disabled' ||
+      savedMode === 'text_only' ||
+      savedMode === 'voice_only' ||
+      savedMode === 'text_and_voice' ||
+      savedMode === 'random'
+    ) {
+      setVoiceReplyMode(savedMode);
+    }
+
     setLoading(false);
   }, [activeBusiness, toast]);
 
@@ -207,8 +228,15 @@ export default function IntegrationsPage() {
       const result = await supabase
         .from('integrations')
         .update({ config })
-        .eq('id', integration.id);
+        .eq('id', integration.id)
+        .select()
+        .maybeSingle();
       error = result.error;
+      if (!result.error && result.data) {
+        setIntegrations((current) =>
+          current.map((item) => item.id === integration.id ? (result.data as Integration) : item)
+        );
+      }
     } else {
       // QR-connected businesses may have a whatsapp_sessions row without an
       // integrations row. Create the integration automatically so the rule
@@ -221,8 +249,13 @@ export default function IntegrationsPage() {
           name: 'WhatsApp',
           status: 'connected',
           config,
-        });
+        })
+        .select()
+        .maybeSingle();
       error = result.error;
+      if (!result.error && result.data) {
+        setIntegrations((current) => [...current, result.data as Integration]);
+      }
     }
 
     setSavingVoiceMode(false);
