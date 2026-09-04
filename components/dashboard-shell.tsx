@@ -23,7 +23,7 @@ import {
 import {
   LayoutDashboard, Bot, MessageSquare, Users, Calendar, CheckSquare,
   BookOpen, Package, Image, Plug, UserCog, BarChart3, Settings, Zap,
-  Menu, LogOut, ChevronDown, Building, Shield, Moon, Sun, Bell, AlertCircle,
+  Menu, LogOut, ChevronDown, Building, Shield, Moon, Sun, Bell, AlertCircle, Mic2,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { useToast } from '@/hooks/use-toast';
@@ -42,6 +42,7 @@ const NAV_ITEMS = [
   { href: '/dashboard/media', label: 'Media & Documents', icon: Image },
   { href: '/dashboard/group-rules', label: 'Group Rules', icon: Users },
   { href: '/dashboard/integrations', label: 'Integrations', icon: Plug },
+  { href: '/dashboard/voice-studio', label: 'Voice Studio', icon: Mic2 },
   { href: '/dashboard/team', label: 'Team', icon: UserCog },
   { href: '/dashboard/analytics', label: 'Analytics', icon: BarChart3 },
   { href: '/dashboard/settings', label: 'Settings', icon: Settings },
