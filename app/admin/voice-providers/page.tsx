@@ -26,6 +26,7 @@ export default function VoiceProvidersPage() {
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
+  const [testing, setTesting] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -52,6 +53,26 @@ export default function VoiceProvidersPage() {
 
   const updateConfig = (id: string, patch: Partial<VoiceProvider>) => {
     setConfigs((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
+  };
+
+  const testConnection = async (config: VoiceProvider) => {
+    setTesting(config.id);
+    const { data: { session } } = await supabase.auth.getSession();
+    const response = await fetch('/api/admin/voice-provider-config/test', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+      },
+      body: JSON.stringify({ configId: config.id, baseUrl: config.base_url }),
+    });
+    const result = await response.json().catch(() => ({}));
+    setTesting(null);
+    toast({
+      title: response.ok ? 'Connection successful' : 'Connection failed',
+      description: result.message || result.error || 'Unable to test Voicebox',
+      variant: response.ok ? 'default' : 'destructive',
+    });
   };
 
   const save = async (config: VoiceProvider) => {
@@ -170,6 +191,13 @@ export default function VoiceProvidersPage() {
                   {isVoicebox ? 'Examples: qwen, chatterbox, chatterbox_turbo, luxtts, tada.' : 'Use a low-latency model for WhatsApp voice replies.'}
                 </p>
               </div>
+
+{isVoicebox && (
+                <Button variant="outline" onClick={() => testConnection(config)} disabled={testing === config.id}>
+                  {testing === config.id ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Server className="w-4 h-4 mr-2" />}
+                  Test Connection
+                </Button>
+              )}
 
               <Button onClick={() => save(config)} disabled={saving === config.id}>
                 {saving === config.id ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
