@@ -163,6 +163,7 @@ export default function LeadsPage() {
                 <TableHead>Name</TableHead>
                 <TableHead>Phone</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>AI Score</TableHead>
                 <TableHead>Source</TableHead>
                 <TableHead>Interested In</TableHead>
                 <TableHead>Created</TableHead>
@@ -171,11 +172,14 @@ export default function LeadsPage() {
             <TableBody>
               {leads.map((lead) => {
                 const statusInfo = LEAD_STATUSES.find((s) => s.value === lead.status);
+                const score = getLeadScore(lead);
+                const heat = score >= 80 ? 'Hot' : score >= 60 ? 'Warm' : 'Cold';
                 return (
                   <TableRow key={lead.id} className="cursor-pointer" onClick={() => window.location.href = `/dashboard/leads/${lead.id}`}>
                     <TableCell className="font-medium">{lead.name}</TableCell>
                     <TableCell className="text-muted-foreground">{lead.phone || '-'}</TableCell>
                     <TableCell><Badge className={statusInfo?.color} variant="secondary">{statusInfo?.label ?? lead.status}</Badge></TableCell>
+                    <TableCell><Badge variant={score >= 80 ? 'destructive' : score >= 60 ? 'default' : 'secondary'}>{heat} {score}/100</Badge></TableCell>
                     <TableCell className="text-muted-foreground capitalize">{lead.source}</TableCell>
                     <TableCell className="text-muted-foreground">{lead.interested_product || '-'}</TableCell>
                     <TableCell className="text-muted-foreground text-sm">{new Date(lead.created_at).toLocaleDateString()}</TableCell>
@@ -224,4 +228,19 @@ export default function LeadsPage() {
       />
     </div>
   );
+}
+
+function getLeadScore(lead: Lead): number {
+  if (lead.status === 'won') return 100;
+  if (lead.status === 'lost') return 0;
+  let score = 20;
+  if (lead.status === 'contacted') score += 15;
+  if (lead.status === 'qualified') score += 35;
+  if (lead.status === 'appointment_booked') score += 45;
+  if (lead.status === 'proposal') score += 55;
+  if (lead.budget) score += 10;
+  if (lead.interested_product) score += 10;
+  if (lead.requirement) score += 10;
+  if (lead.phone || lead.email) score += 5;
+  return Math.min(score, 99);
 }
