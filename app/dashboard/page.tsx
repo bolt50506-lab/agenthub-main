@@ -5,7 +5,7 @@ import { useAuth } from '@/lib/auth-context';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Users, Calendar, CheckSquare, Bot, TrendingUp, Clock, ArrowRight } from 'lucide-react';
+import { Users, Calendar, CheckSquare, Bot, TrendingUp, Clock, ArrowRight, CircleDollarSign } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import Link from 'next/link';
 import { LEAD_STATUSES, APPOINTMENT_STATUSES, FOLLOWUP_STATUSES } from '@/lib/types/database';
@@ -13,10 +13,13 @@ import { LEAD_STATUSES, APPOINTMENT_STATUSES, FOLLOWUP_STATUSES } from '@/lib/ty
 interface DashboardData {
   totalLeads: number;
   newLeads: number;
+  convertedCustomers: number;
+  conversionRate: number;
   appointments: number;
   pendingFollowUps: number;
   activeAgents: number;
   recentLeads: Array<{ id: string; name: string; status: string; created_at: string; interested_product: string | null }>;
+  recentConversions: Array<{ id: string; name: string; phone: string | null; interested_product: string | null; conversion_amount: number | null; conversion_currency: string | null; converted_at: string | null }>;
   upcomingAppointments: Array<{ id: string; customer_name: string | null; date: string; start_time: string; status: string }>;
   pendingFollowUpsList: Array<{ id: string; task_type: string; scheduled_at: string; notes: string | null; status: string }>;
   recentActivities: Array<{ id: string; action: string; entity_type: string | null; created_at: string }>;
@@ -33,27 +36,35 @@ export default function DashboardOverview() {
     (async () => {
       const bizId = activeBusiness.id;
 
-      const [leads, newLeads, appointments, followUps, agents, activities] = await Promise.all([
+      const [recentLeadsResult, totalLeadsResult, newLeadsResult, convertedResult, recentConversionsResult, appointmentsResult, appointmentCountResult, followUps, agents, activities] = await Promise.all([
         supabase.from('leads').select('id, name, status, created_at, interested_product').eq('business_id', bizId).order('created_at', { ascending: false }).limit(5),
         supabase.from('leads').select('id', { count: 'exact', head: true }).eq('business_id', bizId),
+        supabase.from('leads').select('id', { count: 'exact', head: true }).eq('business_id', bizId).eq('status', 'new'),
+        supabase.from('leads').select('id', { count: 'exact', head: true }).eq('business_id', bizId).eq('status', 'won'),
+        supabase.from('leads').select('id, name, phone, interested_product, conversion_amount, conversion_currency, converted_at').eq('business_id', bizId).eq('status', 'won').order('converted_at', { ascending: false, nullsFirst: false }).limit(5),
         supabase.from('appointments').select('id, customer_name, date, start_time, status').eq('business_id', bizId).gte('date', new Date().toISOString().split('T')[0]).order('date', { ascending: true }).limit(5),
+        supabase.from('appointments').select('id', { count: 'exact', head: true }).eq('business_id', bizId).gte('date', new Date().toISOString().split('T')[0]),
         supabase.from('follow_up_tasks').select('id, task_type, scheduled_at, notes, status').eq('business_id', bizId).eq('status', 'pending').order('scheduled_at', { ascending: true }).limit(5),
         supabase.from('agents').select('id, name, status, purpose').eq('business_id', bizId),
         supabase.from('activity_logs').select('id, action, entity_type, created_at').eq('business_id', bizId).order('created_at', { ascending: false }).limit(8),
       ]);
 
-      const newLeadsCount = (newLeads.data as Array<{ status: string }> | null)?.filter((l) => l.status === 'new').length ?? 0;
+      const totalLeads = totalLeadsResult.count ?? 0;
+      const convertedCustomers = convertedResult.count ?? 0;
       const pendingFollowUpsCount = (followUps.data ?? []).length;
       const activeAgents = (agents.data ?? []).filter((a) => a.status === 'active').length;
 
       setData({
-        totalLeads: leads.count ?? 0,
-        newLeads: newLeadsCount,
-        appointments: appointments.count ?? 0,
+        totalLeads,
+        newLeads: newLeadsResult.count ?? 0,
+        convertedCustomers,
+        conversionRate: totalLeads > 0 ? Number(((convertedCustomers / totalLeads) * 100).toFixed(1)) : 0,
+        appointments: appointmentCountResult.count ?? 0,
         pendingFollowUps: pendingFollowUpsCount,
         activeAgents,
-        recentLeads: leads.data ?? [],
-        upcomingAppointments: appointments.data ?? [],
+        recentLeads: recentLeadsResult.data ?? [],
+        recentConversions: recentConversionsResult.data ?? [],
+        upcomingAppointments: appointmentsResult.data ?? [],
         pendingFollowUpsList: followUps.data ?? [],
         recentActivities: activities.data ?? [],
         agents: agents.data ?? [],
@@ -71,6 +82,8 @@ export default function DashboardOverview() {
   const stats = [
     { label: 'Total Leads', value: data.totalLeads, icon: Users, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-950/30' },
     { label: 'New Leads', value: data.newLeads, icon: TrendingUp, color: 'text-teal-600 dark:text-teal-400', bg: 'bg-teal-50 dark:bg-teal-950/30' },
+    { label: 'Converted Customers', value: data.convertedCustomers, icon: CircleDollarSign, color: 'text-green-600 dark:text-green-400', bg: 'bg-green-50 dark:bg-green-950/30' },
+    { label: 'Conversion Rate', value: data.conversionRate + '%', icon: TrendingUp, color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-50 dark:bg-emerald-950/30' },
     { label: 'Appointments', value: data.appointments, icon: Calendar, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-950/30' },
     { label: 'Pending Follow-ups', value: data.pendingFollowUps, icon: CheckSquare, color: 'text-orange-600 dark:text-orange-400', bg: 'bg-orange-50 dark:bg-orange-950/30' },
     { label: 'Active AI Agents', value: data.activeAgents, icon: Bot, color: 'text-primary', bg: 'bg-primary/5' },
@@ -79,7 +92,7 @@ export default function DashboardOverview() {
   return (
     <div className="space-y-6">
       {/* Stats */}
-      <div className="grid grid-cols-1 min-[420px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 min-[420px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4">
         {stats.map((stat) => (
           <Card key={stat.label}>
             <CardContent className="p-4">
@@ -126,6 +139,41 @@ export default function DashboardOverview() {
                     </Link>
                   );
                 })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Recent Conversions */}
+        <Card>
+          <CardHeader className="flex-row items-center justify-between">
+            <div>
+              <CardTitle>Recent Conversions</CardTitle>
+              <CardDescription>Customers whose leads were marked as Converted</CardDescription>
+            </div>
+            <Link href="/dashboard/leads">
+              <Button variant="ghost" size="sm" className="gap-1">
+                View leads <ArrowRight className="w-3.5 h-3.5" />
+              </Button>
+            </Link>
+          </CardHeader>
+          <CardContent>
+            {data.recentConversions.length === 0 ? (
+              <EmptyState icon={CircleDollarSign} message="No converted customers yet. Mark a lead as Converted to record it here." />
+            ) : (
+              <div className="space-y-3">
+                {data.recentConversions.map((lead) => (
+                  <Link key={lead.id} href={"/dashboard/leads/" + lead.id} className="flex items-center justify-between p-3 rounded-lg border border-green-200 dark:border-green-900 hover:bg-accent transition-colors">
+                    <div>
+                      <p className="text-sm font-medium">{lead.name}</p>
+                      <p className="text-xs text-muted-foreground">{lead.phone || lead.interested_product || 'Converted customer'}</p>
+                    </div>
+                    <div className="text-right">
+                      <Badge className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" variant="secondary">Converted</Badge>
+                      {lead.conversion_amount != null && <p className="text-xs text-muted-foreground mt-1">{lead.conversion_currency || 'PKR'} {lead.conversion_amount}</p>}
+                    </div>
+                  </Link>
+                ))}
               </div>
             )}
           </CardContent>
