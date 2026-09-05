@@ -166,23 +166,40 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      if (lead && automationSettings.stop_on_customer_reply && lead.conversation_id) {
-        const { data: customerReply } = await supabase
-          .from('messages')
-          .select('id')
-          .eq('conversation_id', lead.conversation_id)
-          .eq('sender_type', 'customer')
-          .gt('created_at', lead.created_at)
+      if (lead && automationSettings.stop_on_customer_reply && lead.conversation_id && Number(task.followup_number || 1) > 1) {
+        // Do not cancel the first follow-up merely because the lead originally
+        // replied. For later follow-ups, stop only when the customer replied
+        // after the previous automated follow-up was actually sent.
+        const { data: previousFollowUp } = await supabase
+          .from('follow_up_tasks')
+          .select('sent_at')
+          .eq('lead_id', lead.id)
+          .eq('automation_generated', true)
+          .eq('status', 'completed')
+          .lt('followup_number', task.followup_number)
+          .not('sent_at', 'is', null)
+          .order('followup_number', { ascending: false })
           .limit(1)
           .maybeSingle();
-        if (customerReply) {
-          await supabase
-            .from('follow_up_tasks')
-            .update({ status: 'cancelled', last_error: null })
-            .eq('lead_id', lead.id)
-            .eq('automation_generated', true)
-            .in('status', ['pending', 'processing']);
-          continue;
+
+        if (previousFollowUp?.sent_at) {
+          const { data: customerReply } = await supabase
+            .from('messages')
+            .select('id')
+            .eq('conversation_id', lead.conversation_id)
+            .eq('sender_type', 'customer')
+            .gt('created_at', previousFollowUp.sent_at)
+            .limit(1)
+            .maybeSingle();
+          if (customerReply) {
+            await supabase
+              .from('follow_up_tasks')
+              .update({ status: 'cancelled', last_error: 'Customer replied after previous automated follow-up' })
+              .eq('lead_id', lead.id)
+              .eq('automation_generated', true)
+              .in('status', ['pending', 'processing']);
+            continue;
+          }
         }
       }
 
