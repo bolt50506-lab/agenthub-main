@@ -66,7 +66,7 @@ export default function Home() {
     document.getElementById(widgetId)?.remove();
     document.getElementById(styleId)?.remove();
     document.getElementById(scriptId)?.remove();
-    delete (window as Window & Record<string, unknown>)[instanceKey];
+    delete (window as unknown as Record<string, unknown>)[instanceKey];
 
     const script = document.createElement('script');
     script.id = scriptId;
@@ -78,7 +78,7 @@ export default function Home() {
       script.remove();
       document.getElementById(widgetId)?.remove();
       document.getElementById(styleId)?.remove();
-      delete (window as Window & Record<string, unknown>)[instanceKey];
+      delete (window as unknown as Record<string, unknown>)[instanceKey];
     };
   }, []);
 
