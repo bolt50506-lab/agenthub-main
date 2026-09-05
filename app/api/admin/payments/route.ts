@@ -36,12 +36,31 @@ export async function GET(req: NextRequest) {
   const admin = await requireAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const supabase = createServiceClient();
+  // Do not depend on a nested PostgREST relationship here. A submitted proof is
+  // identified directly by submitted_at + screenshot path and must always appear.
   const { data, error } = await supabase
     .from('public_checkout_orders')
-    .select('id,order_number,customer_name,customer_email,business_name,country_code,currency,amount_cents,payment_method,status,payment_screenshot_path,payment_reference,submitted_at,created_at,subscription_plans(name,slug)')
-    .in('status', ['pending_review','approved','rejected'])
-    .order('submitted_at', { ascending: false, nullsFirst: false });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    .select('id,order_number,customer_name,customer_email,business_name,country_code,currency,amount_cents,payment_method,status,payment_screenshot_path,payment_reference,submitted_at,created_at,plan_id')
+    .not('submitted_at', 'is', null)
+    .not('payment_screenshot_path', 'is', null)
+    .order('submitted_at', { ascending: false });
+
+  if (error) return NextResponse.json(
+    { error: error.message },
+    { status: 500, headers: { 'Cache-Control': 'no-store, max-age=0' } }
+  );
+
+  const planIds = [...new Set((data || []).map((row: any) => row.plan_id).filter(Boolean))];
+  const { data: plans, error: plansError } = planIds.length
+    ? await supabase.from('subscription_plans').select('id,name,slug').in('id', planIds)
+    : { data: [], error: null };
+
+  if (plansError) return NextResponse.json(
+    { error: plansError.message },
+    { status: 500, headers: { 'Cache-Control': 'no-store, max-age=0' } }
+  );
+
+  const planMap = new Map((plans || []).map((plan: any) => [plan.id, { name: plan.name, slug: plan.slug }]));
 
   const rows = await Promise.all((data || []).map(async (row: any) => {
     let screenshotUrl: string | null = null;
@@ -49,9 +68,18 @@ export async function GET(req: NextRequest) {
       const signed = await supabase.storage.from('payment-proofs').createSignedUrl(row.payment_screenshot_path, 60 * 10);
       screenshotUrl = signed.data?.signedUrl || null;
     }
-    return { ...row, screenshotUrl };
+
+    return {
+      ...row,
+      subscription_plans: planMap.get(row.plan_id) || null,
+      screenshotUrl,
+    };
   }));
-  return NextResponse.json({ payments: rows });
+
+  return NextResponse.json(
+    { payments: rows, count: rows.length },
+    { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' } }
+  );
 }
 
 export async function POST(req: NextRequest) {
