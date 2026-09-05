@@ -14,9 +14,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Bot, Plus, MoreVertical, Trash2, Edit, Play, Pause, Loader2 } from 'lucide-react';
+import { Bot, Plus, MoreVertical, Trash2, Edit, Play, Pause, Loader2, BadgeDollarSign, Headphones, CalendarCheck, CheckSquare } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import type { Agent } from '@/lib/types/database';
+
+const AGENT_ROLES = [
+  { value: 'Sales', label: 'Sales Agent', icon: BadgeDollarSign, description: 'Qualifies leads, handles objections and drives conversions.' },
+  { value: 'Support', label: 'Support Agent', icon: Headphones, description: 'Solves customer questions using the knowledge base.' },
+  { value: 'Booking', label: 'Booking Agent', icon: CalendarCheck, description: 'Collects details and books appointments.' },
+  { value: 'Follow-up', label: 'Follow-up Agent', icon: CheckSquare, description: 'Re-engages leads and manages follow-up actions.' },
+];
 
 const PROVIDERS = [
   { value: 'gemini', label: 'Google Gemini' },
@@ -76,7 +83,7 @@ export default function AgentsPage() {
         supported_languages: form.supported_languages.split(',').map((l) => l.trim()).filter(Boolean),
         ai_provider: form.ai_provider,
         status: 'active',
-        enabled_capabilities: ['search_knowledge', 'search_products'],
+        enabled_capabilities: getCapabilitiesForPurpose(form.purpose),
       })
       .select()
       .maybeSingle();
@@ -121,6 +128,10 @@ export default function AgentsPage() {
 
   return (
     <div className="space-y-6">
+      <div className="grid gap-3 md:grid-cols-4">
+        {AGENT_ROLES.map((role) => { const Icon = role.icon; const count = agents.filter((a) => a.purpose === role.value && a.status === 'active').length; return <Card key={role.value} className="border-muted"><CardContent className="p-4"><div className="flex items-center justify-between"><Icon className="w-5 h-5 text-primary" /><Badge variant="secondary">{count} active</Badge></div><p className="mt-3 text-sm font-semibold">{role.label}</p><p className="mt-1 text-xs text-muted-foreground">{role.description}</p></CardContent></Card>; })}
+      </div>
+
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">{agents.length} agent{agents.length !== 1 ? 's' : ''}</p>
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
@@ -137,8 +148,17 @@ export default function AgentsPage() {
                 <Input id="name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Customer Support Agent" />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="purpose">Purpose</Label>
-                <Input id="purpose" value={form.purpose} onChange={(e) => setForm({ ...form, purpose: e.target.value })} placeholder="Sales, Support, etc." />
+                <Label>Agent Role</Label>
+                <Select value={form.purpose} onValueChange={(v) => setForm({ ...form, purpose: v, primary_goal: v.toLowerCase().replace(/\s+/g, '_') })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Sales">Sales Agent</SelectItem>
+                    <SelectItem value="Support">Support Agent</SelectItem>
+                    <SelectItem value="Booking">Booking Agent</SelectItem>
+                    <SelectItem value="Follow-up">Follow-up Agent</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Each role gets purpose-specific capabilities so conversations can be routed to the right specialist.</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="description">Description</Label>
@@ -253,4 +273,13 @@ export default function AgentsPage() {
       </AlertDialog>
     </div>
   );
+}
+
+function getCapabilitiesForPurpose(purpose: string): string[] {
+  const common = ['search_knowledge', 'search_products'];
+  if (purpose === 'Sales') return [...common, 'capture_leads', 'score_leads', 'handle_objections', 'suggest_followups'];
+  if (purpose === 'Support') return [...common, 'escalate_to_human', 'detect_low_confidence'];
+  if (purpose === 'Booking') return [...common, 'collect_customer_details', 'book_appointments'];
+  if (purpose === 'Follow-up') return [...common, 'manage_followups', 'reengage_leads'];
+  return common;
 }
