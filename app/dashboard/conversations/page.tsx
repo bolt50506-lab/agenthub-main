@@ -78,16 +78,73 @@ export default function ConversationsPage() {
 
   useEffect(() => { setLoading(true); loadConversations(); }, [loadConversations]);
   useEffect(() => { if (!selectedId) { setMessages([]); return; } activeConversationRef.current = selectedId; shouldStickToBottomRef.current = true; loadMessages(selectedId); }, [selectedId, loadMessages]);
+
   useEffect(() => {
-    // Conversation messages are no longer polled on a timer. This prevents the
-    // inbox from refreshing every few seconds and moving the message scroller.
-    // The explicit Refresh button remains available when a manual refresh is needed.
-    return undefined;
-  }, []);
+    if (!activeBusiness) return;
+
+    const channel = supabase
+      .channel(`agenthub-conversations-${activeBusiness.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations', filter: `business_id=eq.${activeBusiness.id}` }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          loadConversations();
+          return;
+        }
+        if (payload.eventType === 'DELETE') {
+          const deletedId = (payload.old as { id?: string })?.id;
+          if (!deletedId) return;
+          setConversations((current) => current.filter((conversation) => conversation.id !== deletedId));
+          if (activeConversationRef.current === deletedId) {
+            activeConversationRef.current = null;
+            setSelectedId(null);
+            setMessages([]);
+          }
+          return;
+        }
+
+        const updated = payload.new as Conversation;
+        if (!updated?.id) return;
+        setConversations((current) => current.map((conversation) =>
+          conversation.id === updated.id
+            ? { ...conversation, ...updated }
+            : conversation
+        ));
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `business_id=eq.${activeBusiness.id}` }, (payload) => {
+        const message = payload.new as Message;
+        if (!message?.id || !message.conversation_id) return;
+
+        setConversations((current) => current.map((conversation) =>
+          conversation.id === message.conversation_id
+            ? {
+                ...conversation,
+                lastPreview: message.content,
+                last_message_at: message.created_at,
+              }
+            : conversation
+        ));
+
+        if (activeConversationRef.current !== message.conversation_id) return;
+
+        setMessages((current) => {
+          if (current.some((existing) => existing.id === message.id)) return current;
+          return [...current, message];
+        });
+      })
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn('[Conversation Realtime] Subscription unavailable:', status);
+        }
+      });
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [activeBusiness, loadConversations]);
+
   useEffect(() => {
     // Only force-scroll when opening a conversation or when the user is already
-    // near the bottom. This prevents message updates from pulling the user back
-    // down while they are reading older messages above.
+    // near the bottom. Realtime updates will therefore never pull the user down
+    // while they are reading older messages above.
     if (!shouldStickToBottomRef.current) return;
     requestAnimationFrame(() => {
       const el = messageScrollRef.current;
