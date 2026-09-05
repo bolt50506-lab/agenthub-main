@@ -69,9 +69,44 @@ function normalizeVoiceboxLanguage(value: string | null): string {
     mandarin: 'zh',
     'chinese (mandarin)': 'zh',
     zh: 'zh',
+    japanese: 'ja',
+    ja: 'ja',
+    korean: 'ko',
+    ko: 'ko',
+    german: 'de',
+    de: 'de',
+    french: 'fr',
+    fr: 'fr',
+    russian: 'ru',
+    ru: 'ru',
+    portuguese: 'pt',
+    pt: 'pt',
+    spanish: 'es',
+    es: 'es',
+    italian: 'it',
+    it: 'it',
+    hebrew: 'he',
+    he: 'he',
+    arabic: 'ar',
+    ar: 'ar',
+    danish: 'da',
+    da: 'da',
+    greek: 'el',
+    el: 'el',
+    finnish: 'fi',
+    fi: 'fi',
+    hindi: 'hi',
+    hi: 'hi',
+    urdu: 'hi',
+    'roman urdu': 'hi',
+    romanurdu: 'hi',
+    malay: 'ms',
+    ms: 'ms',
   };
 
-  return aliases[raw] || raw;
+  const supported = new Set(['zh', 'en', 'ja', 'ko', 'de', 'fr', 'ru', 'pt', 'es', 'it', 'he', 'ar', 'da', 'el', 'fi', 'hi', 'ms']);
+  const normalized = aliases[raw] || raw;
+  return supported.has(normalized) ? normalized : 'en';
 }
 
 function providerErrorMessage(data: Record<string, unknown>, fallback: string): string {
