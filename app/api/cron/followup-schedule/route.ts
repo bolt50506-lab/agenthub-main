@@ -7,9 +7,11 @@ function authorized(req: NextRequest) {
   const header = req.headers.get('authorization') || '';
   const followupSecret = process.env.FOLLOWUP_CRON_SECRET;
   const cronSecret = process.env.CRON_SECRET;
+  const webhookSecret = process.env.AGENTHUB_WEBHOOK_SECRET;
   return (
     (Boolean(followupSecret) && header === `Bearer ${followupSecret}`) ||
-    (Boolean(cronSecret) && header === `Bearer ${cronSecret}`)
+    (Boolean(cronSecret) && header === `Bearer ${cronSecret}`) ||
+    (Boolean(webhookSecret) && header === `Bearer ${webhookSecret}`)
   );
 }
 
