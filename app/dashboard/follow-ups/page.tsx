@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Plus, CheckSquare, Check, X, Loader2 } from 'lucide-react';
+import { Plus, CheckSquare, Check, X, Loader2, Bot, Clock3, Send, AlertTriangle, RefreshCw } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { FOLLOWUP_STATUSES, type FollowUpTask } from '@/lib/types/database';
 
@@ -33,11 +33,14 @@ export default function FollowUpsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({ task_type: 'call', scheduled_at: '', notes: '' });
+  const [automation, setAutomation] = useState<any>(null);
 
   const fetchFollowUps = async () => {
     if (!activeBusiness) return;
     const { data } = await supabase.from('follow_up_tasks').select('*').eq('business_id', activeBusiness.id).order('scheduled_at', { ascending: true });
     setFollowUps(data as FollowUpTask[] ?? []);
+    const { data: automationData } = await supabase.from('followup_automation_settings').select('*').eq('business_id', activeBusiness.id).maybeSingle();
+    setAutomation(automationData);
     setLoading(false);
   };
 
@@ -84,6 +87,8 @@ export default function FollowUpsPage() {
 
   const now = new Date().toISOString();
   const upcoming = followUps.filter((f) => f.status === 'pending' && f.scheduled_at >= now);
+  const automated = followUps.filter((f: any) => f.automation_generated);
+  const completed = followUps.filter((f) => f.status === 'completed');
   const overdue = followUps.filter((f) => f.status === 'pending' && f.scheduled_at < now);
 
   const renderTable = (items: FollowUpTask[]) => {
@@ -132,6 +137,26 @@ export default function FollowUpsPage() {
 
   return (
     <div className="space-y-6">
+      <div className="rounded-2xl border bg-gradient-to-br from-primary/10 via-background to-background p-5 sm:p-7">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="flex items-center gap-2"><div className="rounded-xl bg-primary/15 p-2"><Bot className="h-5 w-5 text-primary" /></div><Badge variant={automation?.enabled ? 'default' : 'secondary'}>{automation?.enabled ? 'Automation ON' : 'Automation OFF'}</Badge></div>
+            <h1 className="mt-4 text-2xl font-bold tracking-tight">Follow-up Center</h1>
+            <p className="mt-1 text-sm text-muted-foreground">Automatic WhatsApp follow-ups keep active leads engaged without manual chasing.</p>
+          </div>
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="rounded-xl border bg-background/80 px-4 py-3"><p className="text-xl font-bold">{automated.length}</p><p className="text-xs text-muted-foreground">Automated</p></div>
+            <div className="rounded-xl border bg-background/80 px-4 py-3"><p className="text-xl font-bold">{upcoming.length}</p><p className="text-xs text-muted-foreground">Upcoming</p></div>
+            <div className="rounded-xl border bg-background/80 px-4 py-3"><p className="text-xl font-bold">{completed.length}</p><p className="text-xs text-muted-foreground">Completed</p></div>
+          </div>
+        </div>
+        <div className="mt-5 flex flex-wrap items-center gap-3 text-sm">
+          <Badge variant="outline" className="gap-1.5"><Clock3 className="h-3.5 w-3.5" /> First follow-up: {automation?.first_delay_hours ?? 24}h</Badge>
+          <Badge variant="outline" className="gap-1.5"><Send className="h-3.5 w-3.5" /> Channel: WhatsApp</Badge>
+          {automation?.enabled ? <span className="text-muted-foreground">The worker checks due follow-ups automatically every 5 minutes.</span> : <span className="flex items-center gap-1 text-amber-600"><AlertTriangle className="h-4 w-4" /> Automation is disabled, so no automatic messages will be sent.</span>}
+          <Button variant="ghost" size="sm" onClick={fetchFollowUps} className="ml-auto gap-2"><RefreshCw className="h-4 w-4" /> Refresh</Button>
+        </div>
+      </div>
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">{followUps.length} follow-up task{followUps.length !== 1 ? 's' : ''}</p>
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
