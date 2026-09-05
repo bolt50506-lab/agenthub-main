@@ -250,7 +250,7 @@ export default function GroupRulesPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="flex items-center justify-between p-3 rounded-lg border border-border">
                   <span className="text-sm">Allow price list response</span>
                   <Switch checked={rules.allow_price_list} onCheckedChange={(v) => setRules({ ...rules, allow_price_list: v })} />
@@ -264,7 +264,7 @@ export default function GroupRulesPage() {
                 <span className="text-sm">Require product name in inquiry</span>
                 <Switch checked={rules.require_product_name} onCheckedChange={(v) => setRules({ ...rules, require_product_name: v })} />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Response Language</Label>
                   <Input value={rules.response_language} onChange={(e) => setRules({ ...rules, response_language: e.target.value })} />
