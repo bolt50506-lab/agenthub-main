@@ -45,6 +45,7 @@ const NAV_ITEMS = [
   { href: '/dashboard/voice-studio', label: 'Voice Studio', icon: Mic2 },
   { href: '/dashboard/team', label: 'Team', icon: UserCog },
   { href: '/dashboard/analytics', label: 'Analytics', icon: BarChart3 },
+  { href: '/dashboard/notifications', label: 'Notifications', icon: Bell },
   { href: '/dashboard/settings', label: 'Settings', icon: Settings },
 ];
 
