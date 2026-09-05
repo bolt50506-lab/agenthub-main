@@ -17,6 +17,7 @@ export default function ConversationsPage() {
   const [conversations, setConversations] = useState<ConversationRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -77,7 +78,7 @@ export default function ConversationsPage() {
   }, []);
 
   useEffect(() => { setLoading(true); loadConversations(); }, [loadConversations]);
-  useEffect(() => { if (!selectedId) { setMessages([]); return; } activeConversationRef.current = selectedId; shouldStickToBottomRef.current = true; loadMessages(selectedId); }, [selectedId, loadMessages]);
+  useEffect(() => { if (!selectedId) { setMessages([]); return; } activeConversationRef.current = selectedId; shouldStickToBottomRef.current = true; setMobileDetailOpen(true); loadMessages(selectedId); }, [selectedId, loadMessages]);
 
   useEffect(() => {
     if (!activeBusiness) return;
@@ -235,7 +236,7 @@ export default function ConversationsPage() {
       </div>
 
       <div className="grid min-h-0 grid-cols-1 gap-4 xl:h-[calc(100vh-11rem)] xl:grid-cols-[380px_minmax(0,1fr)]">
-        <Card className="flex min-h-[420px] flex-col overflow-hidden xl:min-h-0">
+        <Card className={`flex min-h-[420px] flex-col overflow-hidden xl:min-h-0 ${mobileDetailOpen ? 'hidden md:flex' : 'flex'}`}>
           <CardHeader className="space-y-3 pb-3">
             <div className="flex items-center justify-between"><CardTitle className="text-base">All conversations</CardTitle><Badge variant="secondary">{filteredConversations.length}</Badge></div>
             <div className="relative"><Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" /><Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search conversations..." className="pl-9" /></div>
@@ -256,9 +257,10 @@ export default function ConversationsPage() {
           </CardContent>
         </Card>
 
-        <Card className="flex min-h-[520px] flex-col overflow-hidden xl:min-h-0">
+        <Card className={`flex min-h-[520px] flex-col overflow-hidden xl:min-h-0 ${mobileDetailOpen ? 'flex' : 'hidden md:flex'}`}>
           {selectedConversation ? <>
             <CardHeader className="border-b pb-4">
+              <Button type="button" variant="ghost" size="sm" className="mb-2 w-fit px-2 md:hidden" onClick={() => setMobileDetailOpen(false)}>← Back to conversations</Button>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">{selectedConversation.type === 'group' ? <Users className="h-5 w-5" /> : <MessageSquare className="h-5 w-5" />}</div><div className="min-w-0"><CardTitle className="truncate text-base">{getConversationLabel(selectedConversation)}</CardTitle><div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">{selectedConversation.channel === 'website_chat' ? <Globe2 className="h-3.5 w-3.5" /> : <Smartphone className="h-3.5 w-3.5" />}<span>{selectedConversation.channel === 'website_chat' ? 'Website Widget' : selectedConversation.channel}</span>{selectedConversation.human_takeover ? <Badge variant="secondary" className="h-5 text-[10px]">Human Mode</Badge> : <Badge variant="secondary" className="h-5 text-[10px]">AI On</Badge>}</div></div></div>
                 <Button variant={selectedConversation.human_takeover ? 'outline' : 'default'} size="sm" onClick={() => setHumanMode(!selectedConversation.human_takeover)} disabled={modeChanging}>{modeChanging ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : selectedConversation.human_takeover ? <RotateCcw className="h-4 w-4 mr-2" /> : <UserRound className="h-4 w-4 mr-2" />}{selectedConversation.human_takeover ? 'Resume AI' : 'Take over'}</Button>
