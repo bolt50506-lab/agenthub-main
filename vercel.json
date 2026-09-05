@@ -1,5 +1,7 @@
 {
   "crons": [
+    { "path": "/api/cron/followup-schedule", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/followup-automation", "schedule": "2-59/5 * * * *" },
     { "path": "/api/cron/subscription-lifecycle", "schedule": "0 3 * * *" }
   ]
 }
