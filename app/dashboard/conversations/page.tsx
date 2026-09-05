@@ -79,13 +79,15 @@ export default function ConversationsPage() {
   useEffect(() => { setLoading(true); loadConversations(); }, [loadConversations]);
   useEffect(() => { if (!selectedId) { setMessages([]); return; } activeConversationRef.current = selectedId; shouldStickToBottomRef.current = true; loadMessages(selectedId); }, [selectedId, loadMessages]);
   useEffect(() => {
-    const timer = window.setInterval(() => { loadConversations(); if (selectedId) loadMessages(selectedId); }, 5000);
-    return () => window.clearInterval(timer);
-  }, [loadConversations, loadMessages, selectedId]);
+    // Conversation messages are no longer polled on a timer. This prevents the
+    // inbox from refreshing every few seconds and moving the message scroller.
+    // The explicit Refresh button remains available when a manual refresh is needed.
+    return undefined;
+  }, []);
   useEffect(() => {
     // Only force-scroll when opening a conversation or when the user is already
-    // near the bottom. This prevents the 5-second polling refresh from pulling
-    // the user back down while they are reading older messages above.
+    // near the bottom. This prevents message updates from pulling the user back
+    // down while they are reading older messages above.
     if (!shouldStickToBottomRef.current) return;
     requestAnimationFrame(() => {
       const el = messageScrollRef.current;
