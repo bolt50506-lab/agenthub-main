@@ -152,7 +152,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           <Link
             href="/admin"
             onClick={() => setMobileOpen(false)}
-            className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+            className="flex min-w-0 items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
           >
             <Shield className="w-4 h-4 flex-shrink-0" />
             Super Admin
@@ -225,23 +225,23 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <div className="min-h-screen flex bg-background">
+    <div className="flex min-h-[100dvh] w-full overflow-x-hidden bg-background">
       {/* Desktop Sidebar */}
-      <aside className="hidden lg:flex w-64 flex-col border-r border-border bg-card flex-shrink-0">
+      <aside className="sticky top-0 hidden h-[100dvh] w-64 flex-col border-r border-border bg-card flex-shrink-0 lg:flex">
         <SidebarContent />
       </aside>
 
       {/* Mobile Sidebar */}
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent side="left" className="w-64 p-0">
+        <SheetContent side="left" className="w-[min(20rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] p-0">
           <SidebarContent />
         </SheetContent>
       </Sheet>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
         {/* Top Bar */}
-        <header className="h-16 border-b border-border bg-card flex items-center justify-between px-4 lg:px-6 flex-shrink-0">
+        <header className="flex h-16 flex-shrink-0 items-center justify-between border-b border-border bg-card px-3 sm:px-4 lg:px-6">
           <div className="flex items-center gap-3">
             <Button
               variant="ghost"
@@ -267,7 +267,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+        <main className="mobile-safe flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 lg:p-6">
           {children}
         </main>
       </div>
