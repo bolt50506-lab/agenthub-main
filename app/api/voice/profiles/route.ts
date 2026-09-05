@@ -5,6 +5,45 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
+
+const VOICE_CLONING_AGREEMENT_VERSION = 'voice-cloning-consent-v1';
+const VOICE_CLONING_AGREEMENT_TEXT = `VOICE CLONING CONSENT AND AUTHORIZATION
+
+I confirm that I am either the owner of the voice being submitted or have explicit authorization from the voice owner to create and use this voice clone for the named business.
+
+I understand that voice cloning must not be used for fraud, impersonation, scams, deception, unlawful activity, or any harmful purpose. I am responsible for ensuring that all use of the cloned voice is lawful and properly authorized.
+
+I authorize AgentHub and the configured voice provider to process the submitted voice samples solely for creating and operating the requested business voice clone.`;
+
+async function saveVoiceCloneAgreement(
+  supabase: ReturnType<typeof createServiceClient>,
+  input: {
+    businessId: string;
+    voiceProfileId: string;
+    userId: string;
+    businessName: string;
+    voiceName: string;
+    provider: string;
+  }
+) {
+  const { error } = await supabase.from('voice_clone_agreements').insert({
+    business_id: input.businessId,
+    voice_profile_id: input.voiceProfileId,
+    accepted_by: input.userId,
+    business_name: input.businessName,
+    voice_name: input.voiceName,
+    provider: input.provider,
+    agreement_version: VOICE_CLONING_AGREEMENT_VERSION,
+    agreement_text: VOICE_CLONING_AGREEMENT_TEXT,
+  });
+
+  if (error) {
+    // The clone itself is valid even if the audit write fails, but log loudly
+    // so an administrator can investigate rather than silently losing evidence.
+    console.error('[Voice Profiles] Failed to save cloning agreement:', error);
+  }
+}
+
 const ALLOWED_AUDIO_TYPES = new Set([
   'audio/mpeg',
   'audio/mp3',
@@ -134,6 +173,16 @@ export async function POST(req: NextRequest) {
 
     const { supabase, userId } = auth;
 
+    const { data: business } = await supabase
+      .from('businesses')
+      .select('name')
+      .eq('id', businessId)
+      .maybeSingle();
+
+    if (!business?.name) {
+      return NextResponse.json({ error: 'Business not found' }, { status: 404 });
+    }
+
     const { data: limit, error: limitError } = await supabase.rpc('check_plan_limit', {
       p_business_id: businessId,
       p_limit_type: 'max_voice_clones',
@@ -259,6 +308,15 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: insertError.message }, { status });
       }
 
+      await saveVoiceCloneAgreement(supabase, {
+        businessId,
+        voiceProfileId: voiceProfile.id,
+        userId,
+        businessName: business.name,
+        voiceName: name,
+        provider: 'voicebox',
+      });
+
       return NextResponse.json({ success: true, voice: voiceProfile }, { status: 201 });
     }
 
@@ -356,6 +414,15 @@ export async function POST(req: NextRequest) {
       const status = /limit reached/i.test(insertError.message) ? 403 : 500;
       return NextResponse.json({ error: insertError.message }, { status });
     }
+
+    await saveVoiceCloneAgreement(supabase, {
+      businessId,
+      voiceProfileId: voiceProfile.id,
+      userId,
+      businessName: business.name,
+      voiceName: name,
+      provider: providerConfig.provider,
+    });
 
     return NextResponse.json({ success: true, voice: voiceProfile }, { status: 201 });
   } catch (error) {
