@@ -58,12 +58,28 @@ export default function Home() {
 
   useEffect(() => {
     const scriptId = 'agenthub-public-chat-widget';
-    if (document.getElementById(scriptId)) return;
+    const widgetId = 'agenthub-customer-widget';
+    const styleId = 'agenthub-widget-style';
+    const businessId = '11f62525-3c27-474d-854e-e474c7211d43';
+    const instanceKey = '__AGENTHUB_WIDGET_RUNNING__' + businessId;
+
+    document.getElementById(widgetId)?.remove();
+    document.getElementById(styleId)?.remove();
+    document.getElementById(scriptId)?.remove();
+    delete (window as Window & Record<string, unknown>)[instanceKey];
+
     const script = document.createElement('script');
     script.id = scriptId;
-    script.src = `${window.location.origin}/widget-js?business=11f62525-3c27-474d-854e-e474c7211d43`;
+    script.src = window.location.origin + '/widget-js?business=' + businessId;
     script.async = true;
     document.body.appendChild(script);
+
+    return () => {
+      script.remove();
+      document.getElementById(widgetId)?.remove();
+      document.getElementById(styleId)?.remove();
+      delete (window as Window & Record<string, unknown>)[instanceKey];
+    };
   }, []);
 
   return (
