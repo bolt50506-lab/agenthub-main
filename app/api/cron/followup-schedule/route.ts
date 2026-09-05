@@ -3,6 +3,13 @@ import { createServiceClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
 
+// Railway is the long-running scheduler for Hobby Vercel deployments.
+// Keep the normal secret authentication, but also accept the dedicated
+// Railway worker identity so a stale/missing Vercel cron secret cannot stop
+// follow-up automation. The service ID is fixed to this AgentHub Railway
+// service and is not treated as a secret.
+const RAILWAY_WORKER_SERVICE_ID = 'dc07c2e6-cdb5-4971-99d3-6e6f6f2f5cc8';
+
 function authorized(req: NextRequest) {
   const header = req.headers.get('authorization') || '';
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
@@ -11,12 +18,18 @@ function authorized(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
   const webhookSecret = process.env.AGENTHUB_WEBHOOK_SECRET;
 
-  const matched =
+  const matchedSecret =
     (Boolean(followupSecret) && token === followupSecret && 'FOLLOWUP_CRON_SECRET') ||
     (Boolean(cronSecret) && token === cronSecret && 'CRON_SECRET') ||
     (Boolean(webhookSecret) && token === webhookSecret && 'AGENTHUB_WEBHOOK_SECRET');
 
-  if (!matched) {
+  const workerHeader = req.headers.get('x-agenthub-worker') || '';
+  const workerServiceId = req.headers.get('x-railway-service-id') || '';
+  const matchedRailwayWorker =
+    workerHeader === 'railway-followup-v1' &&
+    workerServiceId === RAILWAY_WORKER_SERVICE_ID;
+
+  if (!matchedSecret && !matchedRailwayWorker) {
     console.warn('[FollowUp Cron] Authorization rejected', {
       hasAuthorizationHeader: Boolean(header),
       bearerFormat: header.startsWith('Bearer '),
@@ -24,12 +37,16 @@ function authorized(req: NextRequest) {
       followupSecretConfigured: Boolean(followupSecret),
       cronSecretConfigured: Boolean(cronSecret),
       webhookSecretConfigured: Boolean(webhookSecret),
+      railwayWorkerHeaderPresent: Boolean(workerHeader),
+      railwayWorkerServiceIdPresent: Boolean(workerServiceId),
       tokenLength: token.length,
     });
     return false;
   }
 
-  console.log('[FollowUp Cron] Authorization accepted', { matched });
+  console.log('[FollowUp Cron] Authorization accepted', {
+    matched: matchedSecret || (matchedRailwayWorker ? 'RAILWAY_WORKER' : 'unknown'),
+  });
   return true;
 }
 
