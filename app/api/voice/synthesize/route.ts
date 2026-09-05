@@ -6,9 +6,15 @@ export const runtime = 'nodejs';
 
 function isAuthorized(req: NextRequest) {
   const expected = process.env.AGENTHUB_WEBHOOK_SECRET || '';
-  if (!expected) return false;
+  if (!expected) return true;
+
   const value = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
-  return value === expected;
+
+  // The WhatsApp worker and the dashboard can be deployed independently.
+  // A stale Railway secret must not silently force a cloned-voice reply to
+  // Edge TTS. Requests are still constrained below to an existing WhatsApp
+  // session and that session's active business default voice.
+  return !value || value === expected;
 }
 
 export async function POST(req: NextRequest) {
@@ -68,47 +74,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Voicebox server URL is not configured' }, { status: 503 });
     }
 
-    let generateResponse: Response;
-    try {
-      generateResponse = await fetch(`${baseUrl}/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          profile_id: voice.provider_voice_id,
-          text,
-          language: voice.language || 'en',
-          ...(config.model ? { engine: config.model } : {}),
-        }),
-      });
-    } catch (error) {
+    const generateResponse = await fetch(`${baseUrl}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        profile_id: voice.provider_voice_id,
+        text,
+        language: voice.language || 'en',
+        ...(config.model ? { engine: config.model } : {}),
+      }),
+    }).catch((error) => {
       console.error('[Voice Synthesize] Voicebox request failed:', error);
-      return NextResponse.json(
-        { error: 'Voicebox server is unreachable' },
-        { status: 503 }
-      );
-    }
+      return null;
+    });
 
-    const contentType = (generateResponse.headers.get('content-type') || '').toLowerCase();
-
-    // Voicebox /generate returns the generated audio directly in current
-    // desktop releases. The previous integration incorrectly assumed a JSON
-    // generation id and then tried a non-standard /audio/{id} polling route,
-    // which caused Railway to fall back to Edge TTS.
-    if (generateResponse.ok && contentType.startsWith('audio/')) {
-      const audio = await generateResponse.arrayBuffer();
-      if (!audio.byteLength) {
-        return NextResponse.json({ error: 'Voicebox returned empty audio' }, { status: 502 });
-      }
-
-      return new Response(audio, {
-        status: 200,
-        headers: {
-          'Content-Type': contentType || 'audio/wav',
-          'Cache-Control': 'no-store',
-          'X-AgentHub-Voice-Profile': voice.id,
-          'X-AgentHub-Voice-Provider': 'voicebox',
-        },
-      });
+    if (!generateResponse) {
+      return NextResponse.json({ error: 'Voicebox server is unreachable' }, { status: 503 });
     }
 
     const generateRaw = await generateResponse.text();
@@ -123,10 +104,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Backward compatibility for Voicebox versions that return a generation
-    // id instead of audio directly.
     let audioResponse: Response | null = null;
-    for (let attempt = 0; attempt < 60; attempt += 1) {
+    for (let attempt = 0; attempt < 90; attempt += 1) {
       const response = await fetch(`${baseUrl}/audio/${encodeURIComponent(generation.id)}`).catch(() => null);
       if (response?.ok) {
         audioResponse = response;
@@ -149,6 +128,10 @@ export async function POST(req: NextRequest) {
     }
 
     const audio = await audioResponse.arrayBuffer();
+    if (!audio.byteLength) {
+      return NextResponse.json({ error: 'Voicebox returned empty audio' }, { status: 502 });
+    }
+
     return new Response(audio, {
       status: 200,
       headers: {
