@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
+import { buildLeadConversionDirective } from '@/lib/ai/lead-conversion';
 import { shouldReplyInGroup } from '@/lib/group-rules';
 import {
   generateAIResponseWithFallback,
@@ -332,6 +333,7 @@ export async function POST(req: NextRequest) {
         */
 
         let systemPrompt = `You are ${agentData.name}. Purpose: ${agentData.purpose}. Style: ${agentData.communication_style || 'professional'}. Goal: ${agentData.primary_goal || 'help customers'}. Give concise, direct replies suitable for instant messaging. Do not over-explain unless the customer asks for detail.`;
+        systemPrompt += `\n\n${buildLeadConversionDirective()}`;
 
         if (knowledgeItems && knowledgeItems.length > 0) {
           const knowledgeText = knowledgeItems
