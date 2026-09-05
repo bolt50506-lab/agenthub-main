@@ -68,34 +68,67 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Voicebox server URL is not configured' }, { status: 503 });
     }
 
-    const generateResponse = await fetch(`${baseUrl}/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        profile_id: voice.provider_voice_id,
-        text,
-        language: voice.language || 'en',
-        engine: config.model || undefined,
-      }),
-    });
+    let generateResponse: Response;
+    try {
+      generateResponse = await fetch(`${baseUrl}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          profile_id: voice.provider_voice_id,
+          text,
+          language: voice.language || 'en',
+          ...(config.model ? { engine: config.model } : {}),
+        }),
+      });
+    } catch (error) {
+      console.error('[Voice Synthesize] Voicebox request failed:', error);
+      return NextResponse.json(
+        { error: 'Voicebox server is unreachable' },
+        { status: 503 }
+      );
+    }
+
+    const contentType = (generateResponse.headers.get('content-type') || '').toLowerCase();
+
+    // Voicebox /generate returns the generated audio directly in current
+    // desktop releases. The previous integration incorrectly assumed a JSON
+    // generation id and then tried a non-standard /audio/{id} polling route,
+    // which caused Railway to fall back to Edge TTS.
+    if (generateResponse.ok && contentType.startsWith('audio/')) {
+      const audio = await generateResponse.arrayBuffer();
+      if (!audio.byteLength) {
+        return NextResponse.json({ error: 'Voicebox returned empty audio' }, { status: 502 });
+      }
+
+      return new Response(audio, {
+        status: 200,
+        headers: {
+          'Content-Type': contentType || 'audio/wav',
+          'Cache-Control': 'no-store',
+          'X-AgentHub-Voice-Profile': voice.id,
+          'X-AgentHub-Voice-Provider': 'voicebox',
+        },
+      });
+    }
 
     const generateRaw = await generateResponse.text();
     let generation: { id?: string; status?: string; error?: string } = {};
     try { generation = generateRaw ? JSON.parse(generateRaw) : {}; } catch {}
 
     if (!generateResponse.ok || !generation.id) {
+      console.error('[Voice Synthesize] Voicebox generation failed:', generateResponse.status, generateRaw.slice(0, 1000));
       return NextResponse.json(
         { error: generation.error || 'Voicebox generation failed', details: generateRaw.slice(0, 1000) },
         { status: 502 }
       );
     }
 
-    // Voicebox persists generated audio by generation id. Poll briefly because
-    // model loading/inference may be asynchronous.
+    // Backward compatibility for Voicebox versions that return a generation
+    // id instead of audio directly.
     let audioResponse: Response | null = null;
     for (let attempt = 0; attempt < 60; attempt += 1) {
-      const response = await fetch(`${baseUrl}/audio/${encodeURIComponent(generation.id)}`);
-      if (response.ok) {
+      const response = await fetch(`${baseUrl}/audio/${encodeURIComponent(generation.id)}`).catch(() => null);
+      if (response?.ok) {
         audioResponse = response;
         break;
       }
@@ -122,6 +155,7 @@ export async function POST(req: NextRequest) {
         'Content-Type': audioResponse.headers.get('content-type') || 'audio/wav',
         'Cache-Control': 'no-store',
         'X-AgentHub-Voice-Profile': voice.id,
+        'X-AgentHub-Voice-Provider': 'voicebox',
       },
     });
   }
