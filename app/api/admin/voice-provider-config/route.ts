@@ -3,6 +3,30 @@ import { createServiceClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
+async function testVoicebox(baseUrl: string) {
+  const normalized = baseUrl.replace(/\/$/, '');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(normalized, { signal: controller.signal, cache: 'no-store' });
+    const raw = await response.text();
+    let payload: { message?: string; version?: string } = {};
+    try { payload = raw ? JSON.parse(raw) : {}; } catch {}
+    if (!response.ok) {
+      return { ok: false, message: `Voicebox returned HTTP ${response.status}` };
+    }
+    if (payload.message !== 'voicebox API') {
+      return { ok: false, message: 'Reachable URL did not return the expected Voicebox API response' };
+    }
+    return { ok: true, message: `Voicebox connected successfully (v${payload.version || 'unknown'})` };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : 'Unable to reach Voicebox' };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+
 export async function POST(req: NextRequest) {
   const token = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
   if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -57,6 +81,27 @@ export async function POST(req: NextRequest) {
     .eq('id', body.configId);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  if (isVoicebox && body.isEnabled === true) {
+    const baseUrl = String(update.base_url || '').trim();
+    if (!baseUrl || !/^https:\/\//i.test(baseUrl)) {
+      return NextResponse.json({ error: 'Voicebox requires a reachable HTTPS server URL' }, { status: 400 });
+    }
+
+    const test = await testVoicebox(baseUrl);
+    await supabase
+      .from('voice_provider_configs')
+      .update({
+        last_tested_at: new Date().toISOString(),
+        last_test_status: test.ok ? 'success' : 'failed',
+        last_test_message: test.message,
+      })
+      .eq('id', body.configId);
+
+    if (!test.ok) {
+      return NextResponse.json({ error: `Voicebox connection test failed: ${test.message}` }, { status: 502 });
+    }
+  }
 
   return NextResponse.json({ success: true });
 }
