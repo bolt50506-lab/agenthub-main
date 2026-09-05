@@ -26,6 +26,9 @@ export default function ConversationsPage() {
   const [modeChanging, setModeChanging] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const messageScrollRef = useRef<HTMLDivElement | null>(null);
+  const shouldStickToBottomRef = useRef(true);
+  const activeConversationRef = useRef<string | null>(null);
 
   const loadConversations = useCallback(async () => {
     if (!activeBusiness) return;
@@ -74,12 +77,28 @@ export default function ConversationsPage() {
   }, []);
 
   useEffect(() => { setLoading(true); loadConversations(); }, [loadConversations]);
-  useEffect(() => { if (!selectedId) { setMessages([]); return; } loadMessages(selectedId); }, [selectedId, loadMessages]);
+  useEffect(() => { if (!selectedId) { setMessages([]); return; } activeConversationRef.current = selectedId; shouldStickToBottomRef.current = true; loadMessages(selectedId); }, [selectedId, loadMessages]);
   useEffect(() => {
     const timer = window.setInterval(() => { loadConversations(); if (selectedId) loadMessages(selectedId); }, 5000);
     return () => window.clearInterval(timer);
   }, [loadConversations, loadMessages, selectedId]);
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  useEffect(() => {
+    // Only force-scroll when opening a conversation or when the user is already
+    // near the bottom. This prevents the 5-second polling refresh from pulling
+    // the user back down while they are reading older messages above.
+    if (!shouldStickToBottomRef.current) return;
+    requestAnimationFrame(() => {
+      const el = messageScrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    });
+  }, [messages, selectedId]);
+
+  const handleMessageScroll = () => {
+    const el = messageScrollRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    shouldStickToBottomRef.current = distanceFromBottom < 80;
+  };
 
   const filteredConversations = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -187,7 +206,7 @@ export default function ConversationsPage() {
               </div>
             </CardHeader>
             <CardContent className="flex min-h-0 flex-1 flex-col p-0">
-              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain bg-muted/20 p-4">
+              <div ref={messageScrollRef} onScroll={handleMessageScroll} className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain bg-muted/20 p-4">
                 {messagesLoading ? <div className="flex h-full items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div> : messages.length === 0 ? <div className="flex h-full items-center justify-center text-sm text-muted-foreground">No messages in this conversation.</div> : messages.map((message) => {
                   const outbound = !message.is_inbound; const human = message.sender_type === 'business';
                   return <div key={message.id} className={`flex ${outbound ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[82%] rounded-2xl px-3.5 py-2.5 text-sm shadow-sm ${outbound ? (human ? 'bg-foreground text-background' : 'bg-primary text-primary-foreground') : 'bg-card border'}`}>{message.sender_type === 'agent' && <div className="mb-1 flex items-center gap-1 text-[10px] opacity-70"><Bot className="h-3 w-3" /> AgentHub AI</div>}{human && <div className="mb-1 flex items-center gap-1 text-[10px] opacity-70"><UserRound className="h-3 w-3" /> Team reply</div>}<p className="whitespace-pre-wrap break-words">{message.content}</p><p className="mt-1 text-right text-[10px] opacity-60">{new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p></div></div>;
