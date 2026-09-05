@@ -168,7 +168,7 @@ export default function LeadDetailPage() {
               <Badge className={statusInfo?.color} variant="secondary">{statusInfo?.label ?? lead.status}</Badge>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2"><Label>Name</Label><Input value={lead.name} onChange={(e) => setLead({ ...lead, name: e.target.value })} /></div>
                 <div className="space-y-2"><Label>Status</Label>
                   <Select value={lead.status} onValueChange={handleStatusChange}>
@@ -177,15 +177,15 @@ export default function LeadDetailPage() {
                   </Select>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2"><Label>Phone</Label><Input value={lead.phone ?? ''} onChange={(e) => setLead({ ...lead, phone: e.target.value })} /></div>
                 <div className="space-y-2"><Label>Email</Label><Input value={lead.email ?? ''} onChange={(e) => setLead({ ...lead, email: e.target.value })} /></div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2"><Label>Source</Label><Input value={lead.source} onChange={(e) => setLead({ ...lead, source: e.target.value })} /></div>
                 <div className="space-y-2"><Label>Interested Product</Label><Input value={lead.interested_product ?? ''} onChange={(e) => setLead({ ...lead, interested_product: e.target.value })} /></div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2"><Label>Budget</Label><Input value={lead.budget ?? ''} onChange={(e) => setLead({ ...lead, budget: e.target.value })} /></div>
                 <div className="space-y-2"><Label>Location</Label><Input value={lead.location ?? ''} onChange={(e) => setLead({ ...lead, location: e.target.value })} /></div>
               </div>
@@ -226,11 +226,11 @@ export default function LeadDetailPage() {
             <CardContent className="space-y-3">
               {showApptForm && (
                 <div className="space-y-3 p-3 rounded-lg border border-border bg-muted/30">
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1"><Label className="text-xs">Date</Label><Input type="date" value={apptForm.date} onChange={(e) => setApptForm({ ...apptForm, date: e.target.value })} /></div>
                     <div className="space-y-1"><Label className="text-xs">Start Time</Label><Input type="time" value={apptForm.start_time} onChange={(e) => setApptForm({ ...apptForm, start_time: e.target.value })} /></div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1"><Label className="text-xs">End Time</Label><Input type="time" value={apptForm.end_time} onChange={(e) => setApptForm({ ...apptForm, end_time: e.target.value })} /></div>
                   </div>
                   <div className="space-y-1"><Label className="text-xs">Notes</Label><Input value={apptForm.notes} onChange={(e) => setApptForm({ ...apptForm, notes: e.target.value })} placeholder="Optional notes" /></div>
@@ -261,7 +261,7 @@ export default function LeadDetailPage() {
             <CardContent className="space-y-3">
               {showFollowUpForm && (
                 <div className="space-y-3 p-3 rounded-lg border border-border bg-muted/30">
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1"><Label className="text-xs">Type</Label>
                       <Select value={followUpForm.task_type} onValueChange={(v) => setFollowUpForm({ ...followUpForm, task_type: v })}>
                         <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
