@@ -144,7 +144,7 @@ export default function AgentsPage() {
                 <Label htmlFor="description">Description</Label>
                 <Textarea id="description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Communication Style</Label>
                   <Select value={form.communication_style} onValueChange={(v) => setForm({ ...form, communication_style: v })}>

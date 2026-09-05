@@ -61,7 +61,7 @@ export default function AnalyticsPage() {
   return (
     <div className="space-y-6">
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 min-[420px]:grid-cols-2 md:grid-cols-4 gap-4">
         {stats.map((stat) => (
           <Card key={stat.label}>
             <CardContent className="p-4">

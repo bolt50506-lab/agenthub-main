@@ -111,17 +111,17 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <div className="min-h-screen flex bg-background">
-      <aside className="hidden lg:flex w-64 flex-col border-r border-border bg-card flex-shrink-0">
+    <div className="flex min-h-[100dvh] w-full overflow-x-hidden bg-background">
+      <aside className="sticky top-0 hidden h-[100dvh] w-64 flex-col border-r border-border bg-card flex-shrink-0 lg:flex">
         <SidebarContent />
       </aside>
 
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent side="left" className="w-64 p-0"><SidebarContent /></SheetContent>
+        <SheetContent side="left" className="w-[min(20rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] p-0"><SidebarContent /></SheetContent>
       </Sheet>
 
-      <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 border-b border-border bg-card flex items-center justify-between px-4 lg:px-6 flex-shrink-0">
+      <div className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
+        <header className="flex h-16 flex-shrink-0 items-center justify-between border-b border-border bg-card px-3 sm:px-4 lg:px-6">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setMobileOpen(true)}><Menu className="w-5 h-5" /></Button>
             <h1 className="text-lg font-semibold hidden sm:block">
@@ -136,7 +136,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6">{children}</main>
+        <main className="mobile-safe flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 lg:p-6">{children}</main>
       </div>
     </div>
   );

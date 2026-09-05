@@ -118,7 +118,7 @@ export default function AgentDetailPage() {
       <Card>
         <CardHeader><CardTitle>Agent Configuration</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Agent Name</Label>
               <Input value={agent.name} onChange={(e) => setAgent({ ...agent, name: e.target.value })} />
@@ -136,7 +136,7 @@ export default function AgentDetailPage() {
               </Select>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Purpose</Label>
               <Input value={agent.purpose} onChange={(e) => setAgent({ ...agent, purpose: e.target.value })} />
@@ -150,7 +150,7 @@ export default function AgentDetailPage() {
             <Label>Description</Label>
             <Textarea value={agent.description ?? ''} onChange={(e) => setAgent({ ...agent, description: e.target.value })} rows={2} />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Communication Style</Label>
               <Input value={agent.communication_style ?? ''} onChange={(e) => setAgent({ ...agent, communication_style: e.target.value })} />
@@ -180,7 +180,7 @@ export default function AgentDetailPage() {
       <Card>
         <CardHeader><CardTitle>Enabled Capabilities</CardTitle></CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {AGENT_CAPABILITIES.map((cap) => (
               <div key={cap.value} className="flex items-center space-x-2">
                 <Checkbox
@@ -198,7 +198,7 @@ export default function AgentDetailPage() {
       <Card>
         <CardHeader><CardTitle>Communication Behavior</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Tone</Label>
               <Select

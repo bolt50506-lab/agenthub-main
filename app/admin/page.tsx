@@ -42,7 +42,7 @@ export default function AdminOverviewPage() {
         <h2 className="text-2xl font-bold">Platform Overview</h2>
         <p className="text-sm text-muted-foreground mt-1">Monitor all businesses and users on the AgentHub platform.</p>
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 min-[420px]:grid-cols-2 md:grid-cols-4 gap-4">
         {cards.map((card) => (
           <Card key={card.label}>
             <CardContent className="p-4">

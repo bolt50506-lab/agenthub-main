@@ -154,23 +154,23 @@ export default function ProductsPage() {
           <DialogContent>
             <DialogHeader><DialogTitle>Add Product or Service</DialogTitle></DialogHeader>
             <div className="space-y-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2"><Label>Name</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
                 <div className="space-y-2"><Label>SKU/Code</Label><Input value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} /></div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2"><Label>Category</Label>
                   <Select value={form.category_id} onValueChange={(v) => setForm({ ...form, category_id: v })}>
                     <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
                     <SelectContent>{categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div className="space-y-2"><Label>Price</Label><Input type="number" step="0.01" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} /></div>
                   <div className="space-y-2"><Label>Currency</Label><Input value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} /></div>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2"><Label>Availability</Label>
                   <Select value={form.availability} onValueChange={(v) => setForm({ ...form, availability: v as ProductAvailability })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
@@ -239,15 +239,15 @@ export default function ProductsPage() {
           <DialogHeader><DialogTitle>Edit Product</DialogTitle></DialogHeader>
           {editProduct && (
             <div className="space-y-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2"><Label>Name</Label><Input value={editProduct.name} onChange={(e) => setEditProduct({ ...editProduct, name: e.target.value })} /></div>
                 <div className="space-y-2"><Label>SKU</Label><Input value={editProduct.sku ?? ''} onChange={(e) => setEditProduct({ ...editProduct, sku: e.target.value })} /></div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2"><Label>Price</Label><Input type="number" step="0.01" value={editProduct.price ?? ''} onChange={(e) => setEditProduct({ ...editProduct, price: e.target.value ? parseFloat(e.target.value) : null })} /></div>
                 <div className="space-y-2"><Label>Currency</Label><Input value={editProduct.currency} onChange={(e) => setEditProduct({ ...editProduct, currency: e.target.value })} /></div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2"><Label>Availability</Label>
                   <Select value={editProduct.availability} onValueChange={(v) => setEditProduct({ ...editProduct, availability: v as ProductAvailability })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
