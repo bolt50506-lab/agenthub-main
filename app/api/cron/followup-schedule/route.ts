@@ -4,8 +4,13 @@ import { createServiceClient } from '@/lib/supabase/server';
 export const runtime = 'nodejs';
 
 function authorized(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  return Boolean(secret) && req.headers.get('authorization') === `Bearer ${secret}`;
+  const header = req.headers.get('authorization') || '';
+  const followupSecret = process.env.FOLLOWUP_CRON_SECRET;
+  const cronSecret = process.env.CRON_SECRET;
+  return (
+    (Boolean(followupSecret) && header === `Bearer ${followupSecret}`) ||
+    (Boolean(cronSecret) && header === `Bearer ${cronSecret}`)
+  );
 }
 
 export async function GET(req: NextRequest) {
