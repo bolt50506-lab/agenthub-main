@@ -27,6 +27,27 @@ function analyzeCustomerIntent(text: string) {
   return { human, complaint, buying, hesitation, followup, conversion, lowConfidence };
 }
 
+async function createBusinessNotifications(supabase: any, businessId: string, type: string, title: string, message: string, metadata: Record<string, unknown>) {
+  try {
+    const { data: members } = await supabase.from('business_members').select('user_id').eq('business_id', businessId).eq('status', 'active');
+    const rows = (members || []).map((m: any) => ({ business_id: businessId, user_id: m.user_id, type, title, message, metadata }));
+    if (rows.length) await supabase.from('notifications').insert(rows);
+  } catch (error) {
+    console.error('[WhatsApp API] Notification persistence failed', error);
+  }
+}
+
+function buildCustomerMemory(existing: Record<string, unknown> | null | undefined, language: string, intent: ReturnType<typeof analyzeCustomerIntent>, message: string) {
+  const memory = { ...(existing || {}) } as Record<string, unknown>;
+  const previousObjections = Array.isArray(memory.objections) ? memory.objections as string[] : [];
+  if (intent.hesitation) memory.objections = Array.from(new Set([...previousObjections, message.slice(0, 500)])).slice(-10);
+  memory.preferred_language = language;
+  memory.buying_stage = intent.conversion ? 'ready_to_convert' : intent.buying ? 'high_intent' : intent.hesitation ? 'objection' : memory.buying_stage || 'exploring';
+  memory.last_intent = intent;
+  memory.last_customer_message_at = new Date().toISOString();
+  return memory;
+}
+
 function limitText(text: string, maxLength?: number | null) {
   if (!maxLength || maxLength <= 0 || text.length <= maxLength) return text;
   return text.slice(0, maxLength).trim();
@@ -134,7 +155,7 @@ export async function POST(req: NextRequest) {
 
     const phone = resolvePhoneNumber(from, phoneNumberFromBody);
     let customer: any = null;
-    const { data: existingCustomer } = await supabase.from('customers').select('id, business_id, name, phone, email, external_id').eq('business_id', businessId).eq('external_id', from).maybeSingle();
+    const { data: existingCustomer } = await supabase.from('customers').select('id, business_id, name, phone, email, external_id, metadata').eq('business_id', businessId).eq('external_id', from).maybeSingle();
     customer = existingCustomer;
     if (!customer) {
       const { data: newCustomer, error: customerCreateError } = await supabase.from('customers').insert({ business_id: businessId, name: pushName || phone || 'WhatsApp Customer', phone: phone || null, external_id: from, metadata: { source: 'whatsapp', whatsapp_id: from, session_id: sessionId, push_name: pushName } }).select().single();
@@ -201,6 +222,10 @@ export async function POST(req: NextRequest) {
     const subscriptionPlansContext = subscriptionPlans?.length ? subscriptionPlans.map((plan) => { const currentPrice = typeof plan.price_cents === 'number' ? `${(plan.price_cents / 100).toFixed(2)} ${plan.currency || ''}` : 'Not provided'; const yearlyPrice = typeof plan.yearly_price_cents === 'number' ? `${(plan.yearly_price_cents / 100).toFixed(2)} ${plan.currency || ''}` : 'Not provided'; const features = Array.isArray(plan.features) && plan.features.length ? plan.features.join(', ') : 'No feature list provided'; return `Plan: ${plan.name}\nDescription: ${plan.description || 'Not provided'}\nExact ${plan.billing_period || 'monthly'} Price: ${currentPrice}\nExact Yearly Price: ${yearlyPrice}\nFeatures: ${features}`; }).join('\n\n---\n\n') : 'No subscription plans are available.';
 
     const intent = analyzeCustomerIntent(message);
+    const detectedMemoryLanguage = detectReplyLanguage(message);
+    const customerMemory = buildCustomerMemory(customer?.metadata, detectedMemoryLanguage, intent, message);
+    await supabase.from('customers').update({ metadata: customerMemory }).eq('id', customer.id);
+    customer.metadata = customerMemory;
     // Keep the CRM pipeline live even when the AI is still formulating its reply.
     if (lead) {
       const nextStatus = intent.conversion ? 'won'
@@ -210,11 +235,17 @@ export async function POST(req: NextRequest) {
       if (nextStatus !== lead.status) {
         const updates: Record<string, unknown> = { status: nextStatus };
         if (intent.buying && nextStatus !== 'won') updates.interested_product = lead.interested_product || null;
+        if (nextStatus === 'won') {
+          updates.converted_at = new Date().toISOString();
+          updates.conversion_notes = 'Automatically marked from high-intent customer message; review conversion amount in dashboard.';
+        }
         await supabase.from('leads').update(updates).eq('id', lead.id);
         lead.status = nextStatus;
+        if (nextStatus === 'won') await createBusinessNotifications(supabase, businessId, 'conversion', 'Lead converted', (lead.name || customer.name || 'A customer') + ' reached a conversion-ready stage.', { lead_id: lead.id, conversation_id: conversation.id });
       }
     }
     if (intent.human || intent.complaint) {
+      await createBusinessNotifications(supabase, businessId, intent.complaint ? 'complaint' : 'human_takeover', intent.complaint ? 'Customer complaint requires attention' : 'Customer requested a human', message.slice(0, 500), { conversation_id: conversation.id, customer_id: customer.id, lead_id: lead?.id || null });
       // Pause AI for this conversation; the existing dashboard resume flow can
       // reactivate it after the human has handled the case.
       await supabase.from('conversations').update({
@@ -324,6 +355,9 @@ export async function POST(req: NextRequest) {
 
     // Post-response pipeline intelligence: keep lead state and follow-up timing
     // aligned with the latest customer intent.
+    if (lead && intent.buying && lead.status !== 'won') {
+      await createBusinessNotifications(supabase, businessId, 'hot_lead', 'Hot lead detected', (customer.name || lead.name || 'Customer') + ' is showing strong purchase intent.', { lead_id: lead.id, conversation_id: conversation.id, customer_id: customer.id });
+    }
     if (lead) {
       const followUpRequestedAt = intent.followup ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : null;
       if (followUpRequestedAt && agentSettings?.auto_followups_enabled === true) {
