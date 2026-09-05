@@ -1,14 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createDecipheriv, createHash } from 'crypto';
-import { createServerClient, createServiceClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
 
-async function requireAdmin() {
-  const auth = await createServerClient();
-  const { data: { user } } = await auth.auth.getUser();
-  if (!user) return null;
-  const { data: profile } = await auth.from('profiles').select('is_super_admin').eq('id', user.id).maybeSingle();
+async function requireAdmin(req: NextRequest) {
+  const authorization = req.headers.get('authorization') || '';
+  const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+  if (!token) return null;
+
+  const supabase = createServiceClient();
+  const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+  if (userError || !user) return null;
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('is_super_admin')
+    .eq('id', user.id)
+    .maybeSingle();
+
   return profile?.is_super_admin ? user : null;
 }
 
@@ -22,8 +32,8 @@ function decryptPassword(value: string) {
   return Buffer.concat([decipher.update(Buffer.from(encryptedB64, 'base64')), decipher.final()]).toString('utf8');
 }
 
-export async function GET() {
-  const admin = await requireAdmin();
+export async function GET(req: NextRequest) {
+  const admin = await requireAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const supabase = createServiceClient();
   const { data, error } = await supabase
@@ -45,7 +55,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const admin = await requireAdmin();
+  const admin = await requireAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const body = await req.json();
   const orderId = String(body.orderId || '');
