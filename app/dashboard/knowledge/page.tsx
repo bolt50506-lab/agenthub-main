@@ -36,7 +36,7 @@ const CATEGORIES: { value: KnowledgeCategory; label: string }[] = [
 ];
 
 export default function KnowledgeBasePage() {
-  const { activeBusiness } = useAuth();
+  const { activeBusiness, session } = useAuth();
   const { toast } = useToast();
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,6 +48,8 @@ export default function KnowledgeBasePage() {
   const [submitting, setSubmitting] = useState(false);
   const [ioOpen, setIoOpen] = useState(false);
   const [form, setForm] = useState({ title: '', category: 'business_info' as KnowledgeCategory, content: '', tags: '' });
+  const [websiteUrl, setWebsiteUrl] = useState('');
+  const [importingWebsite, setImportingWebsite] = useState(false);
 
   const fetchItems = async () => {
     if (!activeBusiness) return;
@@ -60,6 +62,25 @@ export default function KnowledgeBasePage() {
   };
 
   useEffect(() => { fetchItems(); }, [activeBusiness, categoryFilter, search]);
+
+  const handleImportWebsite = async () => {
+    if (!activeBusiness || !websiteUrl.trim() || !session?.access_token) return;
+    setImportingWebsite(true);
+    try {
+      const res = await fetch('/api/knowledge/import-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ businessId: activeBusiness.id, url: websiteUrl.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Website import failed');
+      setWebsiteUrl('');
+      toast({ title: 'Website added to knowledge base', description: `${data.characters.toLocaleString()} characters imported.` });
+      await fetchItems();
+    } catch (e) {
+      toast({ title: 'Website import failed', description: e instanceof Error ? e.message : 'Please try again', variant: 'destructive' });
+    } finally { setImportingWebsite(false); }
+  };
 
   const handleCreate = async () => {
     if (!activeBusiness) return;
@@ -107,6 +128,16 @@ export default function KnowledgeBasePage() {
 
   return (
     <div className="space-y-6">
+      <Card className="border-primary/20">
+        <CardContent className="p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="flex-1 space-y-2"><Label>Train from website</Label><Input value={websiteUrl} onChange={(e) => setWebsiteUrl(e.target.value)} placeholder="https://yourbusiness.com/about" /></div>
+            <Button onClick={handleImportWebsite} disabled={importingWebsite || !websiteUrl.trim()}>{importingWebsite ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <BookOpen className="w-4 h-4 mr-2" />}Import Website</Button>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">Imports readable text from one public page into your AI knowledge base. Add important pages separately for best results.</p>
+        </CardContent>
+      </Card>
+
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3 flex-1">
           <div className="relative flex-1 max-w-xs">
