@@ -149,6 +149,8 @@ export default function IntegrationsPage() {
   const [whatsappQrError, setWhatsappQrError] = useState<string | null>(null);
   const [voiceReplyMode, setVoiceReplyMode] = useState<'disabled' | 'text_only' | 'voice_only' | 'text_and_voice' | 'random'>('text_and_voice');
   const [savingVoiceMode, setSavingVoiceMode] = useState(false);
+  const [voiceFallbackEnabled, setVoiceFallbackEnabled] = useState(true);
+  const [voiceFallbackTimeout, setVoiceFallbackTimeout] = useState('20');
   const qrPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadIntegrations = useCallback(async () => {
@@ -171,7 +173,12 @@ export default function IntegrationsPage() {
     // the selector state always started as text_and_voice, so a successful
     // save could look like it was reverted immediately after refresh.
     const whatsappIntegration = loaded.find((item) => item.type === 'whatsapp');
-    const savedMode = (whatsappIntegration?.config as Record<string, unknown> | undefined)?.voice_reply_mode;
+    const whatsappVoiceConfig = (whatsappIntegration?.config as Record<string, unknown> | undefined) ?? {};
+    const savedMode = whatsappVoiceConfig.voice_reply_mode;
+    const savedFallbackEnabled = whatsappVoiceConfig.voice_clone_fallback_enabled;
+    const savedFallbackTimeout = whatsappVoiceConfig.voice_clone_fallback_timeout_seconds;
+    if (typeof savedFallbackEnabled === 'boolean') setVoiceFallbackEnabled(savedFallbackEnabled);
+    if (typeof savedFallbackTimeout === 'number' && Number.isFinite(savedFallbackTimeout)) setVoiceFallbackTimeout(String(Math.min(60, Math.max(5, Math.round(savedFallbackTimeout))));
 
     if (
       savedMode === 'disabled' ||
@@ -220,6 +227,8 @@ export default function IntegrationsPage() {
     const config = {
       ...((integration?.config ?? {}) as Record<string, unknown>),
       voice_reply_mode: voiceReplyMode,
+      voice_clone_fallback_enabled: voiceFallbackEnabled,
+      voice_clone_fallback_timeout_seconds: Math.min(60, Math.max(5, Number.parseInt(voiceFallbackTimeout, 10) || 20)),
     };
 
     let error: { message: string } | null = null;
@@ -872,6 +881,40 @@ export default function IntegrationsPage() {
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-muted-foreground">Random mode chooses independently for every customer message.</p>
+                    <div className="rounded-md border border-border p-3 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <Label className="text-xs font-medium">Fallback to AI voice</Label>
+                          <p className="text-xs text-muted-foreground mt-1">If the cloned voice does not finish in time or fails, use the configured AI voice instead.</p>
+                        </div>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={voiceFallbackEnabled}
+                          onClick={() => setVoiceFallbackEnabled((value) => !value)}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${voiceFallbackEnabled ? 'bg-primary' : 'bg-muted'}`}
+                        >
+                          <span className={`inline-block h-5 w-5 transform rounded-full bg-background transition-transform ${voiceFallbackEnabled ? 'translate-x-5' : 'translate-x-1'}`} />
+                        </button>
+                      </div>
+                      {voiceFallbackEnabled && (
+                        <div className="space-y-1.5">
+                          <Label htmlFor="voice-fallback-timeout" className="text-xs">Wait for cloned voice before fallback</Label>
+                          <div className="flex items-center gap-2">
+                            <Input
+                              id="voice-fallback-timeout"
+                              type="number"
+                              min="5"
+                              max="60"
+                              value={voiceFallbackTimeout}
+                              onChange={(e) => setVoiceFallbackTimeout(e.target.value)}
+                              className="w-24 h-9"
+                            />
+                            <span className="text-xs text-muted-foreground">seconds (default: 20)</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                     <Button size="sm" onClick={handleSaveVoiceMode} disabled={savingVoiceMode}>
                       {savingVoiceMode && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
                       Save Reply Rule
