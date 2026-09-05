@@ -83,7 +83,11 @@ const CHANNEL_META: Record<IntegrationType, ChannelMeta> = {
     bgColor: 'bg-blue-50 dark:bg-blue-950/30',
     docsUrl: 'https://developers.facebook.com/docs/messenger-platform',
     canTestConnection: true,
-    configFields: [],
+    configFields: [
+      { key: 'page_id', label: 'Facebook Page ID', type: 'text', placeholder: '1234567890', required: true, helpText: 'Numeric ID of your Facebook Page.' },
+      { key: 'page_access_token', label: 'Page Access Token', type: 'password', placeholder: 'EAAG...', required: true, helpText: 'Generated from your Meta App with pages_messaging permission.' },
+      { key: 'verify_token', label: 'Webhook Verify Token', type: 'text', placeholder: 'my-verify-token', required: true, helpText: 'Set this same token in your Meta App webhook config.' },
+    ],
   },
   instagram: {
     icon: Instagram,
@@ -93,7 +97,11 @@ const CHANNEL_META: Record<IntegrationType, ChannelMeta> = {
     bgColor: 'bg-pink-50 dark:bg-pink-950/30',
     docsUrl: 'https://developers.facebook.com/docs/instagram-api',
     canTestConnection: true,
-    configFields: [],
+    configFields: [
+      { key: 'instagram_account_id', label: 'Instagram Account ID', type: 'text', placeholder: '1784...', required: true, helpText: 'IG Business account ID linked to your Facebook Page.' },
+      { key: 'access_token', label: 'Access Token', type: 'password', placeholder: 'EAAG...', required: true, helpText: 'Token with instagram_manage_messages permission.' },
+      { key: 'verify_token', label: 'Webhook Verify Token', type: 'text', placeholder: 'my-verify-token', required: true, helpText: 'Set this same token in your Meta App webhook config.' },
+    ],
   },
   linkedin: {
     icon: Linkedin,
@@ -136,6 +144,7 @@ export default function IntegrationsPage() {
   const [socialLogin, setSocialLogin] = useState<{ provider: 'facebook' | 'instagram'; state: string; targets: Array<{ id: string; label: string; kind: string; picture?: string | null }> } | null>(null);
   const [socialTargetId, setSocialTargetId] = useState('');
   const [socialLoading, setSocialLoading] = useState(false);
+  const [socialConnectProvider, setSocialConnectProvider] = useState<'facebook' | 'instagram' | null>(null);
   const [whatsappMethod, setWhatsappMethod] = useState<WhatsAppConnectionMethod>('cloud_api');
   const [whatsappQrStatus, setWhatsappQrStatus] = useState<string>('not_started');
   const [whatsappQrCode, setWhatsappQrCode] = useState<string | null>(null);
@@ -257,8 +266,12 @@ export default function IntegrationsPage() {
   const getIntegration = (type: IntegrationType) => integrations.find((i) => i.type === type);
 
   const openConfig = (type: IntegrationType) => {
-    if (type === 'facebook_messenger') { startSocialLogin('facebook'); return; }
-    if (type === 'instagram') { startSocialLogin('instagram'); return; }
+    if (type === 'facebook_messenger') { setSocialConnectProvider('facebook'); return; }
+    if (type === 'instagram') { setSocialConnectProvider('instagram'); return; }
+    openManualConfig(type);
+  };
+
+  const openManualConfig = (type: IntegrationType) => {
     const existing = getIntegration(type);
     const existingConfig = (existing?.config ?? {}) as Record<string, unknown>;
     const initial: Record<string, string> = {};
@@ -1256,6 +1269,42 @@ export default function IntegrationsPage() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={socialConnectProvider !== null} onOpenChange={(open) => !open && setSocialConnectProvider(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Choose Connection Method</DialogTitle>
+            <DialogDescription>
+              Select how you want to connect your {socialConnectProvider === 'facebook' ? 'Facebook Messenger' : 'Instagram'} account.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <Button className="h-auto py-4 justify-start text-left" onClick={() => {
+              const provider = socialConnectProvider;
+              setSocialConnectProvider(null);
+              if (provider) startSocialLogin(provider);
+            }}>
+              <div>
+                <div className="font-semibold">Login with {socialConnectProvider === 'facebook' ? 'Facebook' : 'Instagram'}</div>
+                <div className="text-xs opacity-80 mt-1">Login, authorize access, then select the Page or professional profile for your AI bot.</div>
+              </div>
+            </Button>
+            <Button variant="outline" className="h-auto py-4 justify-start text-left" onClick={() => {
+              const provider = socialConnectProvider;
+              setSocialConnectProvider(null);
+              if (provider) {
+                const type = provider === 'facebook' ? 'facebook_messenger' : 'instagram';
+                setTimeout(() => openManualConfig(type), 0);
+              }
+            }}>
+              <div>
+                <div className="font-semibold">Cloud API / Manual Setup</div>
+                <div className="text-xs text-muted-foreground mt-1">Use your own Meta App credentials, IDs and access tokens.</div>
+              </div>
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={socialLogin !== null} onOpenChange={(open) => !open && setSocialLogin(null)}>
         <DialogContent className="max-w-md">
