@@ -5,14 +5,32 @@ export const runtime = 'nodejs';
 
 function authorized(req: NextRequest) {
   const header = req.headers.get('authorization') || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+
   const followupSecret = process.env.FOLLOWUP_CRON_SECRET;
   const cronSecret = process.env.CRON_SECRET;
   const webhookSecret = process.env.AGENTHUB_WEBHOOK_SECRET;
-  return (
-    (Boolean(followupSecret) && header === `Bearer ${followupSecret}`) ||
-    (Boolean(cronSecret) && header === `Bearer ${cronSecret}`) ||
-    (Boolean(webhookSecret) && header === `Bearer ${webhookSecret}`)
-  );
+
+  const matched =
+    (Boolean(followupSecret) && token === followupSecret && 'FOLLOWUP_CRON_SECRET') ||
+    (Boolean(cronSecret) && token === cronSecret && 'CRON_SECRET') ||
+    (Boolean(webhookSecret) && token === webhookSecret && 'AGENTHUB_WEBHOOK_SECRET');
+
+  if (!matched) {
+    console.warn('[FollowUp Cron] Authorization rejected', {
+      hasAuthorizationHeader: Boolean(header),
+      bearerFormat: header.startsWith('Bearer '),
+      tokenPresent: Boolean(token),
+      followupSecretConfigured: Boolean(followupSecret),
+      cronSecretConfigured: Boolean(cronSecret),
+      webhookSecretConfigured: Boolean(webhookSecret),
+      tokenLength: token.length,
+    });
+    return false;
+  }
+
+  console.log('[FollowUp Cron] Authorization accepted', { matched });
+  return true;
 }
 
 export async function GET(req: NextRequest) {
