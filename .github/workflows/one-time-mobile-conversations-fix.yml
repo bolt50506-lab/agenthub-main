@@ -1,0 +1,71 @@
+name: One-time mobile conversations fix
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch conversations mobile UX
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('app/dashboard/conversations/page.tsx')
+          text = path.read_text()
+          marker = "const [mobileDetailOpen, setMobileDetailOpen] = useState(false);"
+
+          if marker not in text:
+              text = text.replace(
+                  "const [selectedId, setSelectedId] = useState<string | null>(null);",
+                  "const [selectedId, setSelectedId] = useState<string | null>(null);\n  " + marker,
+                  1,
+              )
+
+              text = text.replace(
+                  "activeConversationRef.current = selectedId; shouldStickToBottomRef.current = true; loadMessages(selectedId);",
+                  "activeConversationRef.current = selectedId; shouldStickToBottomRef.current = true; setMobileDetailOpen(true); loadMessages(selectedId);",
+                  1,
+              )
+
+              text = text.replace(
+                  "<Card className=\"flex min-h-[420px] flex-col overflow-hidden xl:min-h-0\">",
+                  "<Card className={`flex min-h-[420px] flex-col overflow-hidden xl:min-h-0 ${mobileDetailOpen ? 'hidden md:flex' : 'flex'}`}>",
+                  1,
+              )
+
+              text = text.replace(
+                  "<Card className=\"flex min-h-[520px] flex-col overflow-hidden xl:min-h-0\">",
+                  "<Card className={`flex min-h-[520px] flex-col overflow-hidden xl:min-h-0 ${mobileDetailOpen ? 'flex' : 'hidden md:flex'}`}>",
+                  1,
+              )
+
+              text = text.replace(
+                  "<CardHeader className=\"border-b pb-4\">",
+                  "<CardHeader className=\"border-b pb-4\">\n              <Button type=\"button\" variant=\"ghost\" size=\"sm\" className=\"mb-2 w-fit px-2 md:hidden\" onClick={() => setMobileDetailOpen(false)}>← Back to conversations</Button>",
+                  1,
+              )
+
+              path.write_text(text)
+          
+          # Make the conversations page use the mobile stateful list/detail view.
+          if marker not in path.read_text():
+              raise SystemExit('Mobile patch marker was not written')
+      - name: Commit patch and remove one-time workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/dashboard/conversations/page.tsx
+          git rm .github/workflows/one-time-mobile-conversations-fix.yml
+          git commit -m "Fix mobile conversation navigation"
+          git push
