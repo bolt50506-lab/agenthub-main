@@ -43,6 +43,9 @@ export async function POST(req: NextRequest) {
     if (!['easypaisa','jazzcash','bank_transfer'].includes(paymentMethod)) {
       return NextResponse.json({ error: 'Invalid payment method.' }, { status: 400 });
     }
+    if (countryCode !== 'PK' && paymentMethod !== 'bank_transfer') {
+      return NextResponse.json({ error: 'International checkout currently uses bank transfer only.' }, { status: 400 });
+    }
 
     const supabase = createServiceClient();
     const { data: plan, error: planError } = await supabase
