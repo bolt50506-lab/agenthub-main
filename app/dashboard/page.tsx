@@ -5,7 +5,7 @@ import { useAuth } from '@/lib/auth-context';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Users, Calendar, CheckSquare, Bot, TrendingUp, Clock, ArrowRight, CircleDollarSign } from 'lucide-react';
+import { Users, Calendar, CheckSquare, Bot, TrendingUp, Clock, ArrowRight, CircleDollarSign, MessageSquare, Zap, Plus, UserPlus } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import Link from 'next/link';
 import { LEAD_STATUSES, APPOINTMENT_STATUSES, FOLLOWUP_STATUSES } from '@/lib/types/database';
@@ -91,10 +91,25 @@ export default function DashboardOverview() {
 
   return (
     <div className="space-y-6">
+      <section className="relative overflow-hidden rounded-3xl border bg-gradient-to-br from-primary/15 via-background to-background p-6 sm:p-8">
+        <div className="relative flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <Badge variant="secondary" className="mb-3 gap-2"><Zap className="h-3.5 w-3.5" /> AI Command Center</Badge>
+            <h1 className="text-3xl font-bold tracking-tight">Welcome back, {activeBusiness?.name || 'Business'}.</h1>
+            <p className="mt-2 max-w-2xl text-muted-foreground">Monitor leads, conversions, appointments and AI automation from one live workspace.</p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Link href="/dashboard/conversations"><Button className="gap-2"><MessageSquare className="h-4 w-4" /> Open Inbox</Button></Link>
+            <Link href="/dashboard/leads"><Button variant="outline" className="gap-2"><UserPlus className="h-4 w-4" /> Manage Leads</Button></Link>
+            <Link href="/dashboard/appointments"><Button variant="outline" size="icon" title="Appointments"><Plus className="h-4 w-4" /></Button></Link>
+          </div>
+        </div>
+      </section>
+
       {/* Stats */}
-      <div className="grid grid-cols-1 min-[420px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4">
+      <div className="grid grid-cols-1 min-[420px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7 gap-4">
         {stats.map((stat) => (
-          <Card key={stat.label}>
+          <Card key={stat.label} className="group transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
             <CardContent className="p-4">
               <div className="flex items-center justify-between mb-2">
                 <div className={`w-10 h-10 rounded-lg ${stat.bg} flex items-center justify-center`}>
@@ -108,7 +123,7 @@ export default function DashboardOverview() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* Recent Leads */}
         <Card>
           <CardHeader className="flex-row items-center justify-between">
