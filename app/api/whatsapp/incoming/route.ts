@@ -192,6 +192,40 @@ export async function POST(req: NextRequest) {
     if (aiResponse.error || !aiResponse.content?.trim()) return NextResponse.json({ success: false, reply: 'Sorry, I am temporarily unable to process your message. Please try again in a moment.', error: aiResponse.error || 'AI returned an empty response' }, { status: 503 });
 
     let finalReply = aiResponse.content.trim();
+
+    // Roman Urdu must never silently fall back to English-only. Some models
+    // follow the prompt inconsistently, so enforce a final rewrite pass.
+    if (customerLanguage === 'roman_urdu') {
+      const romanRewrite = await generateAIResponseWithFallback({
+        messages: [{
+          role: 'user',
+          content: `Rewrite the following reply into natural Pakistani Roman Urdu. Keep the exact meaning, facts, prices, names and numbers. Use ONLY Latin letters for normal Urdu sentences. Do not use Urdu/Arabic script. Do not add new information.\\n\\nReply: ${finalReply}`
+        }],
+        systemPrompt: 'You are a strict output formatter. Return only the rewritten customer-facing Roman Urdu reply, with no explanation.',
+        temperature: 0.2,
+        maxTokens: 1024,
+        businessId
+      }, providerConfigs);
+      if (!romanRewrite.error && romanRewrite.content?.trim()) {
+        finalReply = romanRewrite.content.trim();
+      }
+    }
+
+    // Resolve Random at the source once per reply. Railway receives the final
+    // delivery decision instead of depending on another layer to interpret it.
+    // This is independent on every reply: voice can repeat, text can repeat,
+    // and there is no alternating sequence.
+    const resolvedVoiceReplyMode =
+      voiceReplyMode === 'random'
+        ? (Math.random() < 0.5 ? 'text_only' : 'voice_only')
+        : voiceReplyMode;
+
+    console.log('[WhatsApp API] Voice delivery mode:', {
+      configured: voiceReplyMode,
+      resolved: resolvedVoiceReplyMode,
+      random: voiceReplyMode === 'random'
+    });
+
     const normalizedCustomerMessage = String(message || '').toLowerCase();
     const asksAboutVoiceFeature = /\b(voice|audio|voice note|voice reply|voice message|text and voice|text voice)\b/i.test(normalizedCustomerMessage) && /\b(support|available|feature|reply|replies|message|messages|kar|karta|hota|hai|hain|can|does|do)\b/i.test(normalizedCustomerMessage);
     const replyDeniesVoiceFeature = /\b(not available|unavailable|don't have|do not have|doesn't have|not support|doesn't support|cannot support|no voice|feature.*not)\b/i.test(finalReply);
@@ -204,7 +238,7 @@ export async function POST(req: NextRequest) {
     }
 
     let voiceReply: string | null = null;
-    if (voiceReplyMode !== 'disabled' && voiceReplyMode !== 'text_only') {
+    if (resolvedVoiceReplyMode !== 'disabled' && resolvedVoiceReplyMode !== 'text_only') {
       if (detectReplyLanguage(finalReply) === 'urdu') voiceReply = finalReply;
       else if (customerLanguage === 'roman_urdu' || customerLanguage === 'mixed') {
         const voicePrompt = `Convert this customer-facing reply into natural spoken Urdu for voice playback. Preserve meaning exactly. Do not add information. Return only Urdu script.\n\n${finalReply}`;
@@ -213,7 +247,7 @@ export async function POST(req: NextRequest) {
       } else voiceReply = finalReply;
     }
 
-    const { error: aiMessageError } = await supabase.from('messages').insert({ business_id: businessId, conversation_id: conversation.id, sender_type: 'agent', content: finalReply, content_type: 'text', is_inbound: false, metadata: { channel: 'whatsapp', provider: aiResponse.provider, model: aiResponse.model, detected_language: customerLanguage, voice_reply_mode: voiceReplyMode } });
+    const { error: aiMessageError } = await supabase.from('messages').insert({ business_id: businessId, conversation_id: conversation.id, sender_type: 'agent', content: finalReply, content_type: 'text', is_inbound: false, metadata: { channel: 'whatsapp', provider: aiResponse.provider, model: aiResponse.model, detected_language: customerLanguage, voice_reply_mode: resolvedVoiceReplyMode, configured_voice_reply_mode: voiceReplyMode } });
     if (aiMessageError) console.error('[WhatsApp API] AI message save error:', aiMessageError);
     await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversation.id);
 
@@ -233,7 +267,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true, reply: finalReply, voice_reply: voiceReply, voice_reply_mode: voiceReplyMode, voice_clone_enabled: voiceCloneEnabled, voice_clone_fallback_enabled: voiceCloneFallbackEnabled, voice_clone_fallback_timeout_seconds: voiceCloneFallbackTimeoutSeconds, voice_profile_id: defaultVoiceProfile?.id || null, provider: aiResponse.provider, model: aiResponse.model, appointment_id: bookedAppointmentId, detected_language: customerLanguage, business: { id: business.id, name: business.name }, customer_id: customer.id, conversation_id: conversation.id, lead_id: lead?.id || null });
+    return NextResponse.json({ success: true, reply: finalReply, voice_reply: voiceReply, voice_reply_mode: resolvedVoiceReplyMode, configured_voice_reply_mode: voiceReplyMode, voice_clone_enabled: voiceCloneEnabled, voice_clone_fallback_enabled: voiceCloneFallbackEnabled, voice_clone_fallback_timeout_seconds: voiceCloneFallbackTimeoutSeconds, voice_profile_id: defaultVoiceProfile?.id || null, provider: aiResponse.provider, model: aiResponse.model, appointment_id: bookedAppointmentId, detected_language: customerLanguage, business: { id: business.id, name: business.name }, customer_id: customer.id, conversation_id: conversation.id, lead_id: lead?.id || null });
   } catch (error) {
     console.error('[WhatsApp API] Unexpected error:', error);
     return NextResponse.json({ success: false, reply: 'Sorry, something went wrong while processing your message.', error: error instanceof Error ? error.message : 'Unknown error' }, { status: 500 });
