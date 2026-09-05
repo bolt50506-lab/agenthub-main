@@ -62,12 +62,16 @@ export async function GET(req: NextRequest) {
       .from('leads')
       .select('*')
       .eq('business_id', settings.business_id)
-      .gte('created_at', settings.created_at)
       .not('status', 'in', '("won","lost")')
       .limit(200);
 
     for (const lead of leads ?? []) {
-      const createdAt = new Date(lead.created_at || Date.now());
+      // Existing leads should also enter automation after it is enabled. Anchor
+      // the schedule to whichever is newer: lead creation or automation enablement.
+      const createdAt = new Date(Math.max(
+        new Date(lead.created_at || Date.now()).getTime(),
+        new Date(settings.created_at || Date.now()).getTime(),
+      ));
       const delays = [
         Number(settings.first_delay_hours || 24),
         Number(settings.second_delay_hours || 72),
