@@ -353,7 +353,7 @@ export default function AdminBusinessesPage() {
                     <Label htmlFor="biz-description">Business Description</Label>
                     <Textarea id="biz-description" value={newBiz.description} onChange={(e) => setNewBiz({ ...newBiz, description: e.target.value })} rows={2} placeholder="Brief description of the business" />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="biz-website">Website</Label>
                       <Input id="biz-website" value={newBiz.website} onChange={(e) => setNewBiz({ ...newBiz, website: e.target.value })} placeholder="https://" />
@@ -363,7 +363,7 @@ export default function AdminBusinessesPage() {
                       <Input id="biz-phone" value={newBiz.phone} onChange={(e) => setNewBiz({ ...newBiz, phone: e.target.value })} placeholder="+1..." />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="biz-address">Address</Label>
                       <Input id="biz-address" value={newBiz.address} onChange={(e) => setNewBiz({ ...newBiz, address: e.target.value })} placeholder="123 Main St" />
