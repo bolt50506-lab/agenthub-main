@@ -15,6 +15,18 @@ function resolvePhoneNumber(from: string, phoneNumberFromBody: string) {
   const derived = from.replace('@s.whatsapp.net', '').replace('@c.us', '').trim();
   return derived || null;
 }
+function analyzeCustomerIntent(text: string) {
+  const t = text.toLowerCase();
+  const human = /\b(human|person|agent|representative|manager|call me|baat karni|insan|banday|banda)\b/i.test(text);
+  const complaint = /\b(complaint|fraud|scam|angry|upset|worst|bad service|refund|dhoka|shikayat|ghussa)\b/i.test(text);
+  const buying = /\b(buy|purchase|start|subscribe|order|book|payment|pay|price|cost|quote|demo|signup|sign up|khareed|lena|shuru|booking|payment|rate)\b/i.test(text);
+  const hesitation = /\b(not interested|later|think about|too expensive|mehnga|mehngi|soch|abhi nahi|budget)\b/i.test(text);
+  const followup = /\b(tomorrow|kal|later|baad mein|next week|phir)\b/i.test(text);
+  const conversion = /\b(i('m| am)? ready|let's do it|lets do it|i want to buy|payment done|paid|purchase now|subscribe now|shuru karein|kar do|ready hoon)\b/i.test(text);
+  const lowConfidence = text.trim().length < 2 || /^(\?|help|hmm|ok|okay)$/i.test(text.trim());
+  return { human, complaint, buying, hesitation, followup, conversion, lowConfidence };
+}
+
 function limitText(text: string, maxLength?: number | null) {
   if (!maxLength || maxLength <= 0 || text.length <= maxLength) return text;
   return text.slice(0, maxLength).trim();
@@ -22,6 +34,11 @@ function limitText(text: string, maxLength?: number | null) {
 
 export async function POST(req: NextRequest) {
   try {
+    const expectedSecret = process.env.AGENTHUB_WEBHOOK_SECRET || '';
+    if (expectedSecret && req.headers.get('authorization') !== `Bearer ${expectedSecret}`) {
+      return NextResponse.json({ success: false, reply: null, error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await req.json();
     const sessionId = typeof body.session_id === 'string' ? body.session_id.trim() : '';
     const from = typeof body.from === 'string' ? body.from.trim() : '';
@@ -183,10 +200,43 @@ export async function POST(req: NextRequest) {
     const productsContext = products?.length ? products.map((product) => `Product: ${product.name}\nDescription: ${product.description || 'No description provided'}\nExact Price: ${product.price != null ? `${product.price} ${product.currency || ''}` : 'Not provided'}\nAvailability: ${product.availability || 'Not provided'}`).join('\n\n') : 'No products have been added yet.';
     const subscriptionPlansContext = subscriptionPlans?.length ? subscriptionPlans.map((plan) => { const currentPrice = typeof plan.price_cents === 'number' ? `${(plan.price_cents / 100).toFixed(2)} ${plan.currency || ''}` : 'Not provided'; const yearlyPrice = typeof plan.yearly_price_cents === 'number' ? `${(plan.yearly_price_cents / 100).toFixed(2)} ${plan.currency || ''}` : 'Not provided'; const features = Array.isArray(plan.features) && plan.features.length ? plan.features.join(', ') : 'No feature list provided'; return `Plan: ${plan.name}\nDescription: ${plan.description || 'Not provided'}\nExact ${plan.billing_period || 'monthly'} Price: ${currentPrice}\nExact Yearly Price: ${yearlyPrice}\nFeatures: ${features}`; }).join('\n\n---\n\n') : 'No subscription plans are available.';
 
+    const intent = analyzeCustomerIntent(message);
+    // Keep the CRM pipeline live even when the AI is still formulating its reply.
+    if (lead) {
+      const nextStatus = intent.conversion ? 'won'
+        : intent.buying ? 'qualified'
+        : intent.hesitation ? 'contacted'
+        : lead.status || 'new';
+      if (nextStatus !== lead.status) {
+        const updates: Record<string, unknown> = { status: nextStatus };
+        if (intent.buying && nextStatus !== 'won') updates.interested_product = lead.interested_product || null;
+        await supabase.from('leads').update(updates).eq('id', lead.id);
+        lead.status = nextStatus;
+      }
+    }
+    if (intent.human || intent.complaint) {
+      // Pause AI for this conversation; the existing dashboard resume flow can
+      // reactivate it after the human has handled the case.
+      await supabase.from('conversations').update({
+        human_takeover: true,
+        ai_enabled: false,
+        human_takeover_at: new Date().toISOString(),
+      }).eq('id', conversation.id);
+      return NextResponse.json({
+        success: true, reply: null, ignored: true, human_takeover: true,
+        reason: intent.complaint ? 'Complaint escalated to human' : 'Customer requested human assistance',
+        conversation_id: conversation.id, customer_id: customer.id
+      });
+    }
+
     const customerLanguage = detectReplyLanguage(message);
     const languageInstruction = buildLanguageInstruction(message);
     console.log('[WhatsApp API] Detected customer language:', customerLanguage);
-    const systemPrompt = `You are the official WhatsApp assistant for ${business.name}.\n\nYou represent THIS business only.\n\nBUSINESS INFORMATION:\nBusiness Name: ${business.name}\nIndustry: ${business.industry || 'Not specified'}\nBusiness Description: ${business.description || 'Not specified'}\nWebsite: ${business.website || 'Not provided'}\nBusiness Phone: ${business.phone || 'Not provided'}\nBusiness Address: ${business.address || 'Not provided'}\n\nAGENT INFORMATION:\nAgent Name: ${agent?.name || `${business.name} Assistant`}\nAgent Purpose: ${agent?.purpose || 'Help customers and answer business questions'}\nAgent Description: ${agent?.description || 'Not provided'}\nCommunication Style: ${agent?.communication_style || 'Professional'}\nPrimary Goal: ${agent?.primary_goal || 'Help customers effectively'}\n\nAGENT SETTINGS:\nTone: ${agentSettings?.tone || 'professional'}\nResponse Language Setting: ${agentSettings?.response_language || 'English'}\nGreeting Behavior: ${agentSettings?.greeting_behavior || 'Natural'}\nCustom Instructions: ${agentSettings?.custom_instructions || 'None'}\n\nBUSINESS PRODUCTS:\n${productsContext}\n\nBUSINESS KNOWLEDGE:\n${knowledgeContext}\n\nLIVE SUBSCRIPTION PLANS AND PRICING:\n${subscriptionPlansContext}\n\nLANGUAGE OVERRIDE FOR THIS MESSAGE — HIGHEST PRIORITY:\n${languageInstruction}\nDetected customer language: ${customerLanguage}\nThe customer's current language overrides the dashboard/default response language. If the customer uses Roman Urdu, every normal customer-facing sentence must use Latin/English letters; do not answer in Urdu Arabic script. If the customer uses English, answer in English. If the customer uses Urdu script, answer in Urdu script. If mixed, naturally preserve the mix. Do not translate the customer's Roman Urdu into English-only.\n\nIMPORTANT RULES:\n- Represent ${business.name}, not AgentHub AI.\n- Never introduce yourself as AgentHub AI.\n- Never mention internal systems, APIs, AI providers, Gemini, Groq, Ollama, or databases.\n- Only use products, knowledge, prices and policies belonging to ${business.name}.\n- Never invent missing information or prices.\n- If an exact price is available, state it directly.\n- Be helpful, professional and natural.\n- Keep replies suitable for WhatsApp and avoid unnecessary long explanations.\n- Match the customer's language and conversational style.\n- Never claim an action was completed unless it actually happened.\n- Do not restart an existing conversation with a generic greeting.\n\nConversation behavior:\n- Match the customer's energy and pace.\n- Never repeat information already given unless asked.\n- If the customer sounds frustrated or asks for a human, acknowledge that plainly and let a team member follow up.\n- Stay in character as one consistent assistant.\n- Use the recent message history to understand short replies and references.\n`.trim();
+    const systemPrompt = `You are the official WhatsApp assistant for ${business.name}.\n\nYou represent THIS business only.\n\nBUSINESS INFORMATION:\nBusiness Name: ${business.name}\nIndustry: ${business.industry || 'Not specified'}\nBusiness Description: ${business.description || 'Not specified'}\nWebsite: ${business.website || 'Not provided'}\nBusiness Phone: ${business.phone || 'Not provided'}\nBusiness Address: ${business.address || 'Not provided'}\n\nAGENT INFORMATION:\nAgent Name: ${agent?.name || `${business.name} Assistant`}\nAgent Purpose: ${agent?.purpose || 'Help customers and answer business questions'}\nAgent Description: ${agent?.description || 'Not provided'}\nCommunication Style: ${agent?.communication_style || 'Professional'}\nPrimary Goal: ${agent?.primary_goal || 'Help customers effectively'}\n\nAGENT SETTINGS:\nTone: ${agentSettings?.tone || 'professional'}\nResponse Language Setting: ${agentSettings?.response_language || 'English'}\nGreeting Behavior: ${agentSettings?.greeting_behavior || 'Natural'}\nCustom Instructions: ${agentSettings?.custom_instructions || 'None'}\n\nBUSINESS PRODUCTS:\n${productsContext}\n\nBUSINESS KNOWLEDGE:\n${knowledgeContext}\n\nLIVE SUBSCRIPTION PLANS AND PRICING:\n${subscriptionPlansContext}\n\nLANGUAGE OVERRIDE FOR THIS MESSAGE — HIGHEST PRIORITY:\n${languageInstruction}\nDetected customer language: ${customerLanguage}\nThe customer's current language overrides the dashboard/default response language. If the customer uses Roman Urdu, every normal customer-facing sentence must use Latin/English letters; do not answer in Urdu Arabic script. If the customer uses English, answer in English. If the customer uses Urdu script, answer in Urdu script. If mixed, naturally preserve the mix. Do not translate the customer's Roman Urdu into English-only.\n\nIMPORTANT RULES:\n- Represent ${business.name}, not AgentHub AI.\n- Never introduce yourself as AgentHub AI.\n- Never mention internal systems, APIs, AI providers, Gemini, Groq, Ollama, or databases.\n- Only use products, knowledge, prices and policies belonging to ${business.name}.\n- Never invent missing information or prices.\n- If an exact price is available, state it directly.\n- Be helpful, professional and natural.\n- Keep replies suitable for WhatsApp and avoid unnecessary long explanations.\n- Match the customer's language and conversational style.\n- Never claim an action was completed unless it actually happened.\n- Do not restart an existing conversation with a generic greeting.\n\nConversation behavior:\n- Match the customer's energy and pace.\n- Never repeat information already given unless asked.\n- SALES INTELLIGENCE: For genuine prospects, actively but respectfully explain relevant benefits, ROI and solutions. Do not give up after a mild objection; address the objection once with useful value, then respect a clear refusal.
+- If the customer expresses a price/budget objection, explain the most relevant benefit or alternative based only on available business information.
+- LEAD CAPTURE: When useful, naturally ask for missing contact or requirement details. Do not repeatedly ask for information already known.
+- FOLLOW-UP: If the customer explicitly says they will decide later or names a future time, keep the conversation open and allow follow-up automation to re-engage them.
+- ESCALATION: If the customer asks for a human or makes a serious complaint, AI escalation may take over; do not argue or pressure them.\n- Stay in character as one consistent assistant.\n- Use the recent message history to understand short replies and references.\n`.trim();
 
     const aiResponse = await generateAIResponseWithFallback({ messages: conversationHistory, systemPrompt, temperature: 0.7, maxTokens: 1024, businessId }, providerConfigs);
     if (aiResponse.error || !aiResponse.content?.trim()) return NextResponse.json({ success: false, reply: 'Sorry, I am temporarily unable to process your message. Please try again in a moment.', error: aiResponse.error || 'AI returned an empty response' }, { status: 503 });
@@ -270,6 +320,20 @@ export async function POST(req: NextRequest) {
         const voiceResponse = await generateAIResponseWithFallback({ messages: [{ role: 'user', content: voicePrompt }], systemPrompt: 'Return only natural Urdu script suitable for spoken voice. Do not explain.', temperature: 0.2, maxTokens: 1024, businessId }, providerConfigs);
         if (!voiceResponse.error && voiceResponse.content?.trim()) voiceReply = voiceResponse.content.trim();
       } else voiceReply = finalReply;
+    }
+
+    // Post-response pipeline intelligence: keep lead state and follow-up timing
+    // aligned with the latest customer intent.
+    if (lead) {
+      const followUpRequestedAt = intent.followup ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : null;
+      if (followUpRequestedAt && agentSettings?.auto_followups_enabled === true) {
+        await supabase.from('follow_up_tasks').update({ scheduled_at: followUpRequestedAt })
+          .eq('business_id', businessId).eq('lead_id', lead.id).eq('status', 'pending').eq('automation_generated', true);
+      }
+      console.log('[WhatsApp API] Pipeline intelligence', {
+        leadId: lead.id, status: lead.status, buying: intent.buying,
+        conversion: intent.conversion, followup: intent.followup, lowConfidence: intent.lowConfidence
+      });
     }
 
     const { error: aiMessageError } = await supabase.from('messages').insert({ business_id: businessId, conversation_id: conversation.id, sender_type: 'agent', content: finalReply, content_type: 'text', is_inbound: false, metadata: { channel: 'whatsapp', provider: aiResponse.provider, model: aiResponse.model, detected_language: customerLanguage, voice_reply_mode: resolvedVoiceReplyMode, configured_voice_reply_mode: voiceReplyMode } });
