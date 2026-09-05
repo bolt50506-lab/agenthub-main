@@ -193,22 +193,47 @@ export async function POST(req: NextRequest) {
 
     let finalReply = aiResponse.content.trim();
 
-    // Roman Urdu must never silently fall back to English-only. Some models
-    // follow the prompt inconsistently, so enforce a final rewrite pass.
+    // Roman Urdu must never silently fall back to English-only. Use a strict
+    // formatting pass with examples, then validate the result and retry once
+    // if it still looks English-only.
     if (customerLanguage === 'roman_urdu') {
-      const romanRewrite = await generateAIResponseWithFallback({
-        messages: [{
-          role: 'user',
-          content: `Rewrite the following reply into natural Pakistani Roman Urdu. Keep the exact meaning, facts, prices, names and numbers. Use ONLY Latin letters for normal Urdu sentences. Do not use Urdu/Arabic script. Do not add new information.\\n\\nReply: ${finalReply}`
-        }],
-        systemPrompt: 'You are a strict output formatter. Return only the rewritten customer-facing Roman Urdu reply, with no explanation.',
-        temperature: 0.2,
-        maxTokens: 1024,
-        businessId
-      }, providerConfigs);
+      const formatRomanUrdu = async (replyToFormat: string, strictRetry = false) => {
+        const prompt = strictRetry
+          ? `FINAL LANGUAGE CORRECTION REQUIRED. The text below is still English. Convert every normal sentence into natural Pakistani Roman Urdu NOW. Keep names, product names, prices, numbers and abbreviations unchanged. Roman Urdu uses Latin letters, not Urdu script. Example: "Sure! Here's a quick overview of our services." -> "Ji zaroor! Main aap ko hamari services ka mukhtasar overview bata deta hoon." Return only the corrected Roman Urdu customer reply.\\n\\nText: ${replyToFormat}`
+          : `Rewrite the following customer reply into natural Pakistani Roman Urdu. Keep the exact meaning, facts, prices, names and numbers. Use Latin letters for Urdu sentences. Do not use Urdu/Arabic script. Do not add information. Example: "We offer fast support and easy setup." -> "Hum fast support aur asaan setup provide karte hain." Return only the Roman Urdu customer reply.\\n\\nReply: ${replyToFormat}`;
+
+        return generateAIResponseWithFallback({
+          messages: [{ role: 'user', content: prompt }],
+          systemPrompt: 'STRICT OUTPUT FORMATTER: Roman Urdu only. English-only sentences are invalid output.',
+          temperature: 0.1,
+          maxTokens: 1024,
+          businessId
+        }, providerConfigs);
+      };
+
+      const romanMarkers = /\\b(aap|ap|mujhe|mujhy|ham|hum|hai|hain|ho|hain|ka|ki|ke|ko|se|mein|main|aur|bata|bta|chahiye|kar|karo|karein|karain|ji|zaroor|bilkul|yeh|ye|woh|wo|sari|sab|tamam)\\b/i;
+      const englishSignals = /\\b(the|here|sure|quick|friendly|overview|of|our|we|offer|and|with|you|your|this|that|services|service|available)\\b/gi;
+      const looksEnglishOnly = (value: string) => {
+        const englishCount = (value.match(englishSignals) || []).length;
+        return !romanMarkers.test(value) && englishCount >= 2;
+      };
+
+      const romanRewrite = await formatRomanUrdu(finalReply);
       if (!romanRewrite.error && romanRewrite.content?.trim()) {
         finalReply = romanRewrite.content.trim();
       }
+
+      if (looksEnglishOnly(finalReply)) {
+        const retry = await formatRomanUrdu(finalReply, true);
+        if (!retry.error && retry.content?.trim()) {
+          finalReply = retry.content.trim();
+        }
+      }
+
+      console.log('[WhatsApp API] Roman Urdu output enforcement:', {
+        detected: customerLanguage,
+        stillLooksEnglishOnly: looksEnglishOnly(finalReply)
+      });
     }
 
     // Resolve Random at the source once per reply. Railway receives the final
