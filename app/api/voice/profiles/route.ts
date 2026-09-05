@@ -269,18 +269,30 @@ export async function POST(req: NextRequest) {
       }
 
       // Voicebox requires a profile first, then one or more reference audio samples.
-      const profileResponse = await fetch(
-        `${baseUrl}/profiles`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name,
-            description: description || null,
-            language: voiceboxLanguage,
-          }),
-        }
-      );
+      let profileResponse: Response;
+      try {
+        profileResponse = await fetch(
+          `${baseUrl}/profiles`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name,
+              description: description || null,
+              language: voiceboxLanguage,
+            }),
+          }
+        );
+      } catch (error) {
+        console.error('[Voice Profiles] Voicebox is unreachable:', baseUrl, error);
+        return NextResponse.json(
+          {
+            error: 'Voicebox server is unreachable. Start or repair the Voicebox remote server, then verify the configured Voicebox Server URL.',
+            provider: 'voicebox',
+          },
+          { status: 503 }
+        );
+      }
 
       const profileRaw = await profileResponse.text();
       let profileData: Record<string, unknown> = {};
