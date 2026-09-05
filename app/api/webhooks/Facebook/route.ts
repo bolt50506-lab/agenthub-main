@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
+import { buildLeadConversionDirective } from '@/lib/ai/lead-conversion';
 import {
   generateAIResponseWithFallback,
   type ProviderConfig,
@@ -432,6 +433,9 @@ Rules:
 - Never mention AgentHub, APIs, providers, or internal systems.
 - Do not invent products, prices, or policies.
 - Keep replies suitable for Messenger - short, natural, no long essays.
+
+Lead conversion mission:
+${buildLeadConversionDirective()}
         `.trim();
 
         const aiResponse = await generateAIResponseWithFallback(
