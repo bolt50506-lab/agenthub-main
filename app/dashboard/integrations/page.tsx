@@ -178,7 +178,7 @@ export default function IntegrationsPage() {
     const savedFallbackEnabled = whatsappVoiceConfig.voice_clone_fallback_enabled;
     const savedFallbackTimeout = whatsappVoiceConfig.voice_clone_fallback_timeout_seconds;
     if (typeof savedFallbackEnabled === 'boolean') setVoiceFallbackEnabled(savedFallbackEnabled);
-    if (typeof savedFallbackTimeout === 'number' && Number.isFinite(savedFallbackTimeout)) setVoiceFallbackTimeout(String(Math.min(60, Math.max(5, Math.round(savedFallbackTimeout))));
+    if (typeof savedFallbackTimeout === 'number' && Number.isFinite(savedFallbackTimeout)) setVoiceFallbackTimeout(String(Math.min(60, Math.max(5, Math.round(savedFallbackTimeout)))));
 
     if (
       savedMode === 'disabled' ||
