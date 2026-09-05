@@ -318,6 +318,10 @@ export interface Lead {
   status: LeadStatus;
   assigned_to: string | null;
   conversation_summary: string | null;
+  converted_at: string | null;
+  conversion_amount: number | null;
+  conversion_currency: string | null;
+  conversion_notes: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -536,7 +540,7 @@ export const LEAD_STATUSES: { value: LeadStatus; label: string; color: string }[
   { value: 'qualified', label: 'Qualified', color: 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400' },
   { value: 'appointment_booked', label: 'Appointment Booked', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
   { value: 'proposal', label: 'Proposal', color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' },
-  { value: 'won', label: 'Won', color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
+  { value: 'won', label: 'Converted', color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
   { value: 'lost', label: 'Lost', color: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
 ];
 
