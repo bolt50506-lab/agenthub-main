@@ -4,6 +4,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 export const runtime = 'nodejs';
 
 const RAILWAY_WORKER_SERVICE_ID = 'dc07c2e6-cdb5-4971-99d3-6e6f6f2f5cc8';
+const PROCESSING_STALE_MS = 15 * 60 * 1000;
 
 function authorized(req: NextRequest) {
   const header = req.headers.get('authorization') || '';
@@ -19,7 +20,9 @@ function authorized(req: NextRequest) {
 
   const workerHeader = req.headers.get('x-agenthub-worker') || '';
   const workerServiceId = req.headers.get('x-railway-service-id') || '';
-  const matchedRailwayWorker = workerHeader === 'railway-followup-v1' && workerServiceId === RAILWAY_WORKER_SERVICE_ID;
+  const matchedRailwayWorker =
+    workerHeader === 'railway-followup-v1' &&
+    workerServiceId === RAILWAY_WORKER_SERVICE_ID;
 
   if (!matchedSecret && !matchedRailwayWorker) {
     console.warn('[FollowUp Cron] Authorization rejected', {
@@ -76,34 +79,77 @@ async function sendThroughAgentHub(supabase: any, task: any, lead: any) {
 
 export async function GET(req: NextRequest) {
   if (!authorized(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
   const supabase = createServiceClient();
-  const now = new Date().toISOString();
+  const now = new Date();
+
+  // Recover tasks abandoned by a crashed worker. The worker timeout is 120s,
+  // so 15 minutes gives ample safety margin without permanently losing a task.
+  await supabase
+    .from('follow_up_tasks')
+    .update({ status: 'pending', last_error: 'Recovered after stale processing lock' })
+    .eq('status', 'processing')
+    .eq('automation_generated', true)
+    .lt('updated_at', new Date(now.getTime() - PROCESSING_STALE_MS).toISOString());
+
   const { data: due, error } = await supabase
     .from('follow_up_tasks')
-    .select('id,business_id,lead_id,conversation_id,task_type,notes,followup_number,channel')
-    .eq('status', 'pending').lte('scheduled_at', now).eq('automation_generated', true).limit(100);
+    .select('id,business_id,lead_id,conversation_id,task_type,notes,followup_number,channel,scheduled_at')
+    .eq('status', 'pending')
+    .lte('scheduled_at', now.toISOString())
+    .eq('automation_generated', true)
+    .order('scheduled_at', { ascending: true })
+    .limit(100);
+
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   let processed = 0;
   let completed = 0;
+  let claimed = 0;
   const failures: string[] = [];
 
-  for (const task of due ?? []) {
+  for (const candidate of due ?? []) {
+    // Atomic claim: only the request that changes pending -> processing owns
+    // this task. A second concurrent worker gets zero rows and must skip it.
+    const { data: task, error: claimError } = await supabase
+      .from('follow_up_tasks')
+      .update({ status: 'processing', last_error: null })
+      .eq('id', candidate.id)
+      .eq('status', 'pending')
+      .select('id,business_id,lead_id,conversation_id,task_type,notes,followup_number,channel,scheduled_at')
+      .maybeSingle();
+
+    if (claimError) {
+      console.error('[FollowUp Cron] Claim failed', { taskId: candidate.id, error: claimError.message });
+      failures.push(candidate.id);
+      continue;
+    }
+
+    if (!task) {
+      console.log('[FollowUp Cron] Task already claimed by another worker', candidate.id);
+      continue;
+    }
+
     processed++;
+    claimed++;
+
     try {
-      const { data: lead } = task.lead_id ? await supabase.from('leads').select('*').eq('id', task.lead_id).maybeSingle() : { data: null };
+      const { data: lead } = task.lead_id
+        ? await supabase.from('leads').select('*').eq('id', task.lead_id).maybeSingle()
+        : { data: null };
       const { data: automationSettings } = await supabase
         .from('followup_automation_settings')
         .select('enabled, stop_on_customer_reply, stop_on_won')
-        .eq('business_id', task.business_id).maybeSingle();
+        .eq('business_id', task.business_id)
+        .maybeSingle();
 
       if (!automationSettings?.enabled) {
-        await supabase.from('follow_up_tasks').update({ status: 'cancelled', last_error: 'Automation disabled' }).eq('id', task.id);
+        await supabase.from('follow_up_tasks').update({ status: 'cancelled', last_error: 'Automation disabled' }).eq('id', task.id).eq('status', 'processing');
         continue;
       }
 
       if (lead && automationSettings.stop_on_won && ['won', 'lost'].includes(lead.status)) {
-        await supabase.from('follow_up_tasks').update({ status: 'cancelled', last_error: null }).eq('id', task.id);
+        await supabase.from('follow_up_tasks').update({ status: 'cancelled', last_error: null }).eq('id', task.id).eq('status', 'processing');
         continue;
       }
 
@@ -115,35 +161,65 @@ export async function GET(req: NextRequest) {
           .eq('business_id', task.business_id)
           .maybeSingle();
         if (conversation?.human_takeover) {
-          await supabase.from('follow_up_tasks').update({ status: 'cancelled', last_error: 'Human takeover active' }).eq('id', task.id);
+          await supabase.from('follow_up_tasks').update({ status: 'cancelled', last_error: 'Human takeover active' }).eq('id', task.id).eq('status', 'processing');
           continue;
         }
       }
 
       if (lead && automationSettings.stop_on_customer_reply && lead.conversation_id) {
         const { data: customerReply } = await supabase
-          .from('messages').select('id').eq('conversation_id', lead.conversation_id)
-          .eq('sender_type', 'customer').gt('created_at', lead.created_at).limit(1).maybeSingle();
+          .from('messages')
+          .select('id')
+          .eq('conversation_id', lead.conversation_id)
+          .eq('sender_type', 'customer')
+          .gt('created_at', lead.created_at)
+          .limit(1)
+          .maybeSingle();
         if (customerReply) {
-          await supabase.from('follow_up_tasks').update({ status: 'cancelled', last_error: null })
-            .eq('lead_id', lead.id).eq('automation_generated', true).eq('status', 'pending');
+          await supabase
+            .from('follow_up_tasks')
+            .update({ status: 'cancelled', last_error: null })
+            .eq('lead_id', lead.id)
+            .eq('automation_generated', true)
+            .in('status', ['pending', 'processing']);
           continue;
         }
       }
 
+      // scheduled_at was checked before claiming, so future messages are never
+      // sent early. The claim also makes this send single-owner across workers.
       const delivery = await sendThroughAgentHub(supabase, task, lead);
       if (delivery && delivery.success === false) throw new Error(delivery.error || 'WhatsApp follow-up send failed');
 
-      await supabase.from('follow_up_history').insert({ follow_up_id: task.id, business_id: task.business_id, action: 'sent', notes: task.notes || 'Automated follow-up sent' });
-      await supabase.from('follow_up_tasks').update({ status: 'completed', sent_at: new Date().toISOString(), last_error: null }).eq('id', task.id);
-      await supabase.from('activity_logs').insert({ business_id: task.business_id, action: 'automated_followup_processed', entity_type: 'follow_up', entity_id: task.id, metadata: { channel: task.channel, followup_number: task.followup_number } });
+      await supabase.from('follow_up_history').insert({
+        follow_up_id: task.id,
+        business_id: task.business_id,
+        action: 'sent',
+        notes: task.notes || 'Automated follow-up sent',
+      });
+      await supabase
+        .from('follow_up_tasks')
+        .update({ status: 'completed', sent_at: new Date().toISOString(), last_error: null })
+        .eq('id', task.id)
+        .eq('status', 'processing');
+      await supabase.from('activity_logs').insert({
+        business_id: task.business_id,
+        action: 'automated_followup_processed',
+        entity_type: 'follow_up',
+        entity_id: task.id,
+        metadata: { channel: task.channel, followup_number: task.followup_number },
+      });
       completed++;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown follow-up processing error';
       failures.push(task.id);
-      await supabase.from('follow_up_tasks').update({ last_error: message }).eq('id', task.id);
+      await supabase
+        .from('follow_up_tasks')
+        .update({ status: 'pending', last_error: message })
+        .eq('id', task.id)
+        .eq('status', 'processing');
     }
   }
 
-  return NextResponse.json({ ok: true, processed, completed, failed: failures.length });
+  return NextResponse.json({ ok: true, processed, claimed, completed, failed: failures.length });
 }
