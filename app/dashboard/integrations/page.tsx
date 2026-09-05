@@ -132,7 +132,7 @@ const STATUS_CONFIG: Record<IntegrationStatus, { label: string; color: string; i
 const ALL_CHANNELS: IntegrationType[] = ['whatsapp', 'website_chat', 'facebook_messenger', 'instagram', 'linkedin'];
 
 export default function IntegrationsPage() {
-  const { activeBusiness, session } = useAuth();
+  const { activeBusiness } = useAuth();
   const { toast } = useToast();
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [loading, setLoading] = useState(true);
@@ -141,10 +141,6 @@ export default function IntegrationsPage() {
   const [saving, setSaving] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
-  const [socialLogin, setSocialLogin] = useState<{ provider: 'facebook' | 'instagram'; state: string; targets: Array<{ id: string; label: string; kind: string; picture?: string | null }> } | null>(null);
-  const [socialTargetId, setSocialTargetId] = useState('');
-  const [socialLoading, setSocialLoading] = useState(false);
-  const [socialConnectProvider, setSocialConnectProvider] = useState<'facebook' | 'instagram' | null>(null);
   const [whatsappMethod, setWhatsappMethod] = useState<WhatsAppConnectionMethod>('cloud_api');
   const [whatsappQrStatus, setWhatsappQrStatus] = useState<string>('not_started');
   const [whatsappQrCode, setWhatsappQrCode] = useState<string | null>(null);
@@ -201,73 +197,10 @@ export default function IntegrationsPage() {
     loadIntegrations();
   }, [loadIntegrations]);
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const provider = params.get('social_login');
-    const state = params.get('social_state');
-    if (!state || (provider !== 'facebook' && provider !== 'instagram') || !session?.access_token) return;
-
-    setSocialLoading(true);
-    fetch('/api/social-auth/accounts?state=' + encodeURIComponent(state), {
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    })
-      .then(async (res) => ({ ok: res.ok, data: await res.json() }))
-      .then(({ ok, data }) => {
-        if (!ok) throw new Error(data.error || 'Unable to load connected accounts');
-        setSocialLogin({ provider, state, targets: data.targets || [] });
-        setSocialTargetId(data.targets?.[0]?.id || '');
-      })
-      .catch((err) => toast({ title: 'Social login failed', description: err.message, variant: 'destructive' }))
-      .finally(() => {
-        setSocialLoading(false);
-        window.history.replaceState({}, '', '/dashboard/integrations');
-      });
-  }, [session?.access_token, toast]);
-
-  const startSocialLogin = async (provider: 'facebook' | 'instagram') => {
-    if (!activeBusiness || !session?.access_token) return;
-    setSocialLoading(true);
-    try {
-      const res = await fetch('/api/social-auth/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ provider, businessId: activeBusiness.id }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Unable to start login');
-      window.location.href = data.url;
-    } catch (err) {
-      setSocialLoading(false);
-      toast({ title: 'Unable to start login', description: err instanceof Error ? err.message : 'Please try again', variant: 'destructive' });
-    }
-  };
-
-  const connectSelectedSocialTarget = async () => {
-    if (!socialLogin || !socialTargetId || !session?.access_token) return;
-    setSocialLoading(true);
-    try {
-      const res = await fetch('/api/social-auth/accounts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ state: socialLogin.state, targetId: socialTargetId }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Unable to connect selected account');
-      toast({ title: 'Account connected', description: 'Your AI agent can now be assigned to this ' + (socialLogin.provider === 'facebook' ? 'Facebook Page' : 'Instagram profile') + '.' });
-      setSocialLogin(null);
-      await loadIntegrations();
-    } catch (err) {
-      toast({ title: 'Connection failed', description: err instanceof Error ? err.message : 'Please try again', variant: 'destructive' });
-    } finally {
-      setSocialLoading(false);
-    }
-  };
 
   const getIntegration = (type: IntegrationType) => integrations.find((i) => i.type === type);
 
   const openConfig = (type: IntegrationType) => {
-    if (type === 'facebook_messenger') { setSocialConnectProvider('facebook'); return; }
-    if (type === 'instagram') { setSocialConnectProvider('instagram'); return; }
     openManualConfig(type);
   };
 
@@ -1269,73 +1202,6 @@ export default function IntegrationsPage() {
           </div>
         </CardContent>
       </Card>
-
-      <Dialog open={socialConnectProvider !== null} onOpenChange={(open) => !open && setSocialConnectProvider(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Choose Connection Method</DialogTitle>
-            <DialogDescription>
-              Select how you want to connect your {socialConnectProvider === 'facebook' ? 'Facebook Messenger' : 'Instagram'} account.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-3">
-            <Button className="h-auto py-4 justify-start text-left" onClick={() => {
-              const provider = socialConnectProvider;
-              setSocialConnectProvider(null);
-              if (provider) startSocialLogin(provider);
-            }}>
-              <div>
-                <div className="font-semibold">Login with {socialConnectProvider === 'facebook' ? 'Facebook' : 'Instagram'}</div>
-                <div className="text-xs opacity-80 mt-1">Login, authorize access, then select the Page or professional profile for your AI bot.</div>
-              </div>
-            </Button>
-            <Button variant="outline" className="h-auto py-4 justify-start text-left" onClick={() => {
-              const provider = socialConnectProvider;
-              setSocialConnectProvider(null);
-              if (provider) {
-                const type = provider === 'facebook' ? 'facebook_messenger' : 'instagram';
-                setTimeout(() => openManualConfig(type), 0);
-              }
-            }}>
-              <div>
-                <div className="font-semibold">Cloud API / Manual Setup</div>
-                <div className="text-xs text-muted-foreground mt-1">Use your own Meta App credentials, IDs and access tokens.</div>
-              </div>
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={socialLogin !== null} onOpenChange={(open) => !open && setSocialLogin(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>{socialLogin?.provider === 'facebook' ? 'Select Facebook Page' : 'Select Instagram Profile'}</DialogTitle>
-            <DialogDescription>
-              Login completed successfully. Choose exactly where you want your AI bot to handle the inbox.
-            </DialogDescription>
-          </DialogHeader>
-          {socialLogin?.targets.length ? (
-            <div className="space-y-3">
-              <Label>{socialLogin.provider === 'facebook' ? 'Facebook Page' : 'Instagram professional profile'}</Label>
-              <Select value={socialTargetId} onValueChange={setSocialTargetId}>
-                <SelectTrigger><SelectValue placeholder="Choose account" /></SelectTrigger>
-                <SelectContent>
-                  {socialLogin.targets.map((target) => <SelectItem key={target.id} value={target.id}>{target.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">Only the selected account will be connected to this AI bot.</p>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">No eligible accounts were found. Make sure the Facebook Page or Instagram professional account is available to the Meta account you logged in with.</p>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setSocialLogin(null)}>Cancel</Button>
-            <Button disabled={!socialTargetId || socialLoading} onClick={connectSelectedSocialTarget}>
-              {socialLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Connect Selected Account
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Configuration Dialog */}
       <Dialog open={configDialog !== null} onOpenChange={(open) => !open && setConfigDialog(null)}>
