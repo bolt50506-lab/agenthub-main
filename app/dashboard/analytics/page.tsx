@@ -19,12 +19,14 @@ export default function AnalyticsPage() {
   const [totalLeads, setTotalLeads] = useState(0);
   const [totalAppointments, setTotalAppointments] = useState(0);
   const [wonLeads, setWonLeads] = useState(0);
+  const [conversionRevenue, setConversionRevenue] = useState(0);
+  const [hotLeads, setHotLeads] = useState(0);
 
   useEffect(() => {
     if (!activeBusiness) return;
     (async () => {
       const [leads, appointments, agents] = await Promise.all([
-        supabase.from('leads').select('status').eq('business_id', activeBusiness.id),
+        supabase.from('leads').select('status, conversion_amount, budget, interested_product, requirement, created_at').eq('business_id', activeBusiness.id),
         supabase.from('appointments').select('status').eq('business_id', activeBusiness.id),
         supabase.from('agents').select('id, status').eq('business_id', activeBusiness.id),
       ]);
@@ -44,24 +46,37 @@ export default function AnalyticsPage() {
       setAgentCount((agents.data as Array<{ status: string }> | null)?.filter((a) => a.status === 'active').length ?? 0);
       setTotalLeads(leads.data?.length ?? 0);
       setTotalAppointments(appointments.data?.length ?? 0);
-      setWonLeads((leads.data as Array<{ status: string }> | null)?.filter((l) => l.status === 'won').length ?? 0);
+      const allLeads = (leads.data as Array<{ status: string; conversion_amount?: number | null; budget?: string | null; interested_product?: string | null; requirement?: string | null }> | null) ?? [];
+      setWonLeads(allLeads.filter((l) => l.status === 'won').length);
+      setConversionRevenue(allLeads.filter((l) => l.status === 'won').reduce((sum, l) => sum + Number(l.conversion_amount || 0), 0));
+      setHotLeads(allLeads.filter((l) => {
+        let score = 20;
+        if (l.status === 'qualified' || l.status === 'appointment_booked' || l.status === 'proposal') score += 45;
+        if (l.budget) score += 15;
+        if (l.interested_product || l.requirement) score += 15;
+        return l.status !== 'won' && l.status !== 'lost' && score >= 60;
+      }).length);
       setLoading(false);
     })();
   }, [activeBusiness]);
 
   if (loading) return <div className="animate-pulse text-muted-foreground">Loading analytics...</div>;
 
+  const conversionRate = totalLeads ? ((wonLeads / totalLeads) * 100).toFixed(1) : '0.0';
   const stats = [
     { label: 'Total Leads', value: totalLeads, icon: Users, color: 'text-blue-600 dark:text-blue-400' },
     { label: 'Won Leads', value: wonLeads, icon: TrendingUp, color: 'text-green-600 dark:text-green-400' },
     { label: 'Appointments', value: totalAppointments, icon: Calendar, color: 'text-amber-600 dark:text-amber-400' },
+    { label: 'Hot Leads', value: hotLeads, icon: TrendingUp, color: 'text-orange-600 dark:text-orange-400' },
+    { label: 'Conversion Rate', value: conversionRate + '%', icon: TrendingUp, color: 'text-green-600 dark:text-green-400' },
+    { label: 'Conversion Revenue', value: conversionRevenue.toLocaleString(), icon: BarChart3, color: 'text-emerald-600 dark:text-emerald-400' },
     { label: 'Active Agents', value: agentCount, icon: Bot, color: 'text-primary' },
   ];
 
   return (
     <div className="space-y-6">
       {/* Stats */}
-      <div className="grid grid-cols-1 min-[420px]:grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 min-[420px]:grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4">
         {stats.map((stat) => (
           <Card key={stat.label}>
             <CardContent className="p-4">
