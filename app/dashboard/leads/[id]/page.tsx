@@ -57,6 +57,8 @@ export default function LeadDetailPage() {
       name: lead.name, phone: lead.phone, email: lead.email, source: lead.source,
       interested_product: lead.interested_product, budget: lead.budget, location: lead.location,
       requirement: lead.requirement, conversation_summary: lead.conversation_summary,
+      conversion_amount: lead.conversion_amount, conversion_currency: lead.conversion_currency,
+      conversion_notes: lead.conversion_notes,
     }).eq('id', lead.id);
     await supabase.from('activity_logs').insert({
       business_id: activeBusiness.id, action: 'updated_lead', entity_type: 'lead', entity_id: lead.id,
@@ -190,6 +192,17 @@ export default function LeadDetailPage() {
                 <div className="space-y-2"><Label>Location</Label><Input value={lead.location ?? ''} onChange={(e) => setLead({ ...lead, location: e.target.value })} /></div>
               </div>
               <div className="space-y-2"><Label>Requirement</Label><Textarea value={lead.requirement ?? ''} onChange={(e) => setLead({ ...lead, requirement: e.target.value })} rows={2} /></div>
+              {lead.status === 'won' && (
+                <div className="rounded-lg border border-green-200 dark:border-green-900 p-4 space-y-3">
+                  <div className="font-medium text-green-700 dark:text-green-400">Conversion Details</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2"><Label>Conversion Amount</Label><Input type="number" value={lead.conversion_amount ?? ''} onChange={(e) => setLead({ ...lead, conversion_amount: e.target.value === '' ? null : Number(e.target.value) })} placeholder="Optional" /></div>
+                    <div className="space-y-2"><Label>Currency</Label><Input value={lead.conversion_currency ?? 'PKR'} onChange={(e) => setLead({ ...lead, conversion_currency: e.target.value })} /></div>
+                  </div>
+                  <div className="space-y-2"><Label>Conversion Notes</Label><Textarea value={lead.conversion_notes ?? ''} onChange={(e) => setLead({ ...lead, conversion_notes: e.target.value })} placeholder="What was purchased or agreed?" rows={2} /></div>
+                  {lead.converted_at && <p className="text-xs text-muted-foreground">Converted on {new Date(lead.converted_at).toLocaleString()}</p>}
+                </div>
+              )}
               <div className="space-y-2"><Label>Conversation Summary</Label><Textarea value={lead.conversation_summary ?? ''} onChange={(e) => setLead({ ...lead, conversation_summary: e.target.value })} rows={3} /></div>
             </CardContent>
           </Card>
