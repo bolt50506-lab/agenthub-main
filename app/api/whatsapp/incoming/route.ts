@@ -313,6 +313,20 @@ export async function POST(req: NextRequest) {
       voiceReplyMode = configuredMode;
     }
 
+    const voiceConfig = (whatsappIntegration?.config as Record<string, unknown> | null) ?? {};
+    const voiceCloneFallbackEnabled =
+      typeof voiceConfig.voice_clone_fallback_enabled === 'boolean'
+        ? voiceConfig.voice_clone_fallback_enabled
+        : true;
+    const rawVoiceCloneFallbackTimeout =
+      typeof voiceConfig.voice_clone_fallback_timeout_seconds === 'number'
+        ? voiceConfig.voice_clone_fallback_timeout_seconds
+        : 20;
+    const voiceCloneFallbackTimeoutSeconds = Math.min(
+      60,
+      Math.max(5, Math.round(rawVoiceCloneFallbackTimeout))
+    );
+
     console.log('[WhatsApp API] Voice reply mode resolved:', {
       session_id: whatsappSession.id,
       session_integration_id: whatsappSession.integration_id || null,
@@ -2166,6 +2180,8 @@ STRICT RULES:
       voice_reply: voiceReply,
       voice_reply_mode: voiceReplyMode,
       voice_clone_enabled: voiceCloneEnabled,
+      voice_clone_fallback_enabled: voiceCloneFallbackEnabled,
+      voice_clone_fallback_timeout_seconds: voiceCloneFallbackTimeoutSeconds,
       voice_profile_id: defaultVoiceProfile?.id || null,
       provider: aiResponse.provider,
       model: aiResponse.model,
