@@ -60,6 +60,7 @@ export default function ManualPaymentPage() {
   const pendingReview = order.status === 'pending_review';
 
   async function copyPaymentDetails() {
+    if (!order) return;
     const text = `${details.title}\nAccount / IBAN: ${details.account}\nAccount Title: ${details.name}\nAmount: ${order.currency} ${order.amount.toLocaleString()}\nOrder Reference: ${order.orderNumber}`;
     try {
       await navigator.clipboard.writeText(text);
