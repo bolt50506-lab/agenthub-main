@@ -3,7 +3,7 @@ export type ReplyLanguage = 'english' | 'roman_urdu' | 'urdu' | 'mixed';
 export function detectReplyLanguage(text: string): ReplyLanguage {
   const value = text.trim();
   if (!value) return 'english';
-  if (/\p{Arabic}/u.test(value)) return 'urdu';
+  if (/[\u0600-\u06FF]/.test(value)) return 'urdu';
   const lower = value.toLowerCase();
   const romanUrduWords = /\b(ka|ke|ki|ko|hai|hain|tha|thi|ho|aap|ap|mujhe|mujhy|mera|meri|mere|yeh|ye|woh|wo|kya|kyun|kyu|kab|kahan|kitna|kitni|chahiye|batao|bataye|karna|karo|krna|krdo|rate|qeemat|mil|sakta|sakti|sakte|aur|se|mein|main|par|pe|wala|wali|wale|nahi|nahin|haan|ji|please|plz)\b/i;
   const englishWords = /\b(the|is|are|what|which|how|when|where|can|could|would|please|price|cost|need|want|send|tell|give|for|with|and|or|your|you|we|our|this|that)\b/i;
