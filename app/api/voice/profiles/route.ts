@@ -55,6 +55,44 @@ const ALLOWED_AUDIO_TYPES = new Set([
   'audio/m4a',
 ]);
 
+
+function normalizeVoiceboxLanguage(value: string | null): string {
+  const raw = (value || '').trim().toLowerCase();
+  if (!raw) return 'en';
+
+  const aliases: Record<string, string> = {
+    english: 'en',
+    'english (us)': 'en',
+    'english (uk)': 'en',
+    en: 'en',
+    chinese: 'zh',
+    mandarin: 'zh',
+    'chinese (mandarin)': 'zh',
+    zh: 'zh',
+  };
+
+  return aliases[raw] || raw;
+}
+
+function providerErrorMessage(data: Record<string, unknown>, fallback: string): string {
+  if (typeof data.detail === 'string' && data.detail.trim()) return data.detail;
+  if (typeof data.message === 'string' && data.message.trim()) return data.message;
+
+  if (Array.isArray(data.detail)) {
+    const messages = data.detail
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (item && typeof item === 'object' && 'msg' in item && typeof item.msg === 'string') return item.msg;
+        return '';
+      })
+      .filter(Boolean);
+    if (messages.length) return messages.join('; ');
+  }
+
+  if (typeof data.raw === 'string' && data.raw.trim()) return data.raw.slice(0, 1000);
+  return fallback;
+}
+
 async function requireBusinessManager(req: NextRequest, businessId: string) {
   const auth = req.headers.get('authorization') || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
@@ -137,6 +175,7 @@ export async function POST(req: NextRequest) {
     const description = String(form.get('description') || '').trim();
     const language = String(form.get('language') || '').trim() || null;
     const removeBackgroundNoise = String(form.get('removeBackgroundNoise') || 'false') === 'true';
+    const voiceboxLanguage = normalizeVoiceboxLanguage(language);
     const consent = String(form.get('consent') || 'false') === 'true';
     const referenceText = String(form.get('referenceText') || '').trim();
     const files = form
@@ -238,7 +277,7 @@ export async function POST(req: NextRequest) {
           body: JSON.stringify({
             name,
             description: description || null,
-            language: language || 'en',
+            language: voiceboxLanguage,
           }),
         }
       );
@@ -248,7 +287,10 @@ export async function POST(req: NextRequest) {
       try { profileData = profileRaw ? JSON.parse(profileRaw) as Record<string, unknown> : {}; } catch { profileData = { raw: profileRaw }; }
 
       if (!profileResponse.ok || typeof profileData.id !== 'string') {
-        return NextResponse.json({ error: typeof profileData.detail === 'string' ? profileData.detail : 'Voicebox rejected profile creation' }, { status: 502 });
+        return NextResponse.json({
+          error: providerErrorMessage(profileData, 'Voicebox rejected profile creation'),
+          providerStatus: profileResponse.status,
+        }, { status: 502 });
       }
 
       const providerVoiceId = profileData.id;
@@ -295,7 +337,7 @@ export async function POST(req: NextRequest) {
           requires_verification: false,
           is_default: !existingVoices?.length,
           preview_url: null,
-          language: language || 'en',
+          language: voiceboxLanguage,
           consent_confirmed_at: new Date().toISOString(),
           created_by: userId,
         })
