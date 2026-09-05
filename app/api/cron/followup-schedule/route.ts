@@ -3,17 +3,11 @@ import { createServiceClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
 
-// Railway is the long-running scheduler for Hobby Vercel deployments.
-// Keep the normal secret authentication, but also accept the dedicated
-// Railway worker identity so a stale/missing Vercel cron secret cannot stop
-// follow-up automation. The service ID is fixed to this AgentHub Railway
-// service and is not treated as a secret.
 const RAILWAY_WORKER_SERVICE_ID = 'dc07c2e6-cdb5-4971-99d3-6e6f6f2f5cc8';
 
 function authorized(req: NextRequest) {
   const header = req.headers.get('authorization') || '';
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
-
   const followupSecret = process.env.FOLLOWUP_CRON_SECRET;
   const cronSecret = process.env.CRON_SECRET;
   const webhookSecret = process.env.AGENTHUB_WEBHOOK_SECRET;
@@ -80,8 +74,14 @@ export async function GET(req: NextRequest) {
         Number(settings.third_delay_hours || 168),
       ].slice(0, Math.max(1, Math.min(3, Number(settings.max_followups || 3))));
 
+      // Delays are sequential: first delay after the lead is created,
+      // second delay after the first follow-up, third after the second.
+      let cumulativeHours = 0;
+
       for (let index = 0; index < delays.length; index++) {
         const number = index + 1;
+        cumulativeHours += Math.max(0, delays[index]);
+
         const { data: existing } = await supabase
           .from('follow_up_tasks')
           .select('id')
@@ -93,8 +93,8 @@ export async function GET(req: NextRequest) {
 
         if (existing) continue;
 
-        const due = new Date(createdAt.getTime() + delays[index] * 60 * 60 * 1000);
-        await supabase.from('follow_up_tasks').insert({
+        const due = new Date(createdAt.getTime() + cumulativeHours * 60 * 60 * 1000);
+        const { error: insertError } = await supabase.from('follow_up_tasks').insert({
           business_id: settings.business_id,
           lead_id: lead.id,
           conversation_id: lead.conversation_id || null,
@@ -106,7 +106,18 @@ export async function GET(req: NextRequest) {
           followup_number: number,
           channel: (settings.channels || ['whatsapp'])[0] || 'whatsapp',
         });
-        scheduled++;
+
+        // A unique database index is the final guard against two scheduler
+        // requests racing between SELECT and INSERT.
+        if (!insertError) {
+          scheduled++;
+        } else if (insertError.code !== '23505') {
+          console.error('[FollowUp Cron] Failed to create task', {
+            leadId: lead.id,
+            followupNumber: number,
+            error: insertError.message,
+          });
+        }
       }
     }
   }
