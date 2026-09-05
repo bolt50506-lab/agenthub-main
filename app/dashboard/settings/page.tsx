@@ -115,17 +115,17 @@ export default function SettingsPage() {
             <CardContent className="space-y-4">
               {biz && (
                 <>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="space-y-2"><Label>Business Name</Label><Input value={biz.name} onChange={(e) => setBiz({ ...biz, name: e.target.value })} disabled={!canManage} /></div>
                     <div className="space-y-2"><Label>Industry</Label><Input value={biz.industry ?? ''} onChange={(e) => setBiz({ ...biz, industry: e.target.value })} disabled={!canManage} /></div>
                   </div>
                   <div className="space-y-2"><Label>Description</Label><Textarea value={biz.description ?? ''} onChange={(e) => setBiz({ ...biz, description: e.target.value })} rows={2} disabled={!canManage} /></div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="space-y-2"><Label>Website</Label><Input value={biz.website ?? ''} onChange={(e) => setBiz({ ...biz, website: e.target.value })} disabled={!canManage} /></div>
                     <div className="space-y-2"><Label>Phone</Label><Input value={biz.phone ?? ''} onChange={(e) => setBiz({ ...biz, phone: e.target.value })} disabled={!canManage} /></div>
                   </div>
                   <div className="space-y-2"><Label>Address</Label><Input value={biz.address ?? ''} onChange={(e) => setBiz({ ...biz, address: e.target.value })} disabled={!canManage} /></div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="space-y-2"><Label>Time Zone</Label>
                       <Select value={biz.timezone} onValueChange={(v) => setBiz({ ...biz, timezone: v })} disabled={!canManage}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
@@ -155,13 +155,13 @@ export default function SettingsPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               {biz && DAYS.map((day) => (
-                <div key={day.key} className="flex items-center gap-4 p-3 rounded-lg border border-border">
-                  <div className="flex items-center gap-3 flex-1">
+                <div key={day.key} className="flex flex-col items-stretch gap-3 rounded-lg border border-border p-3 sm:flex-row sm:items-center sm:gap-4">
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
                     <Switch checked={biz.working_hours[day.key]?.enabled ?? false} onCheckedChange={(v) => updateWorkingHours(day.key, 'enabled', v)} disabled={!canManage} />
                     <span className="text-sm font-medium w-24">{day.label}</span>
                   </div>
                   {biz.working_hours[day.key]?.enabled && (
-                    <div className="flex items-center gap-2">
+                    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
                       <Input type="time" value={biz.working_hours[day.key]?.open ?? '09:00'} onChange={(e) => updateWorkingHours(day.key, 'open', e.target.value)} className="w-28" disabled={!canManage} />
                       <span className="text-muted-foreground">to</span>
                       <Input type="time" value={biz.working_hours[day.key]?.close ?? '17:00'} onChange={(e) => updateWorkingHours(day.key, 'close', e.target.value)} className="w-28" disabled={!canManage} />
@@ -191,7 +191,7 @@ export default function SettingsPage() {
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="space-y-2"><Label>Primary Provider</Label>
                       <Select value={aiSettings.primary_provider} onValueChange={(v) => setAiSettings({ ...aiSettings, primary_provider: v as AIProvider })} disabled={!canManage}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
@@ -214,15 +214,15 @@ export default function SettingsPage() {
                       </Select>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="space-y-2"><Label>Model Name</Label><Input value={aiSettings.model_name ?? ''} onChange={(e) => setAiSettings({ ...aiSettings, model_name: e.target.value })} placeholder="e.g. gemini-3.6-flash" disabled={!canManage} /></div>
                     <div className="space-y-2"><Label>Ollama URL</Label><Input value={aiSettings.ollama_url ?? ''} onChange={(e) => setAiSettings({ ...aiSettings, ollama_url: e.target.value })} placeholder="http://localhost:11434" disabled={!canManage} /></div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="space-y-2"><Label>Temperature</Label><Input type="number" step="0.01" min="0" max="2" value={aiSettings.temperature} onChange={(e) => setAiSettings({ ...aiSettings, temperature: parseFloat(e.target.value) })} disabled={!canManage} /></div>
                     <div className="space-y-2"><Label>Max Tokens</Label><Input type="number" value={aiSettings.max_tokens} onChange={(e) => setAiSettings({ ...aiSettings, max_tokens: Number(e.target.value) })} disabled={!canManage} /></div>
                   </div>
-                  <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+                  <div className="flex flex-col items-start gap-3 rounded-lg border border-border p-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <p className="text-sm font-medium">Provider is configured</p>
                       <p className="text-xs text-muted-foreground">Mark as configured once environment variables are set</p>
@@ -276,20 +276,20 @@ export default function SettingsPage() {
               <CardDescription>Manage your account security settings.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center justify-between p-4 rounded-lg border border-border">
+              <div className="flex flex-col items-start gap-3 rounded-lg border border-border p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-sm font-medium">Multi-tenant Isolation</p>
                   <p className="text-xs text-muted-foreground">Your data is isolated via Row Level Security policies</p>
                 </div>
                 <Badge variant="default" className="bg-green-600">Active</Badge>
               </div>
-              <div className="flex items-center justify-between p-4 rounded-lg border border-border">
+              <div className="flex flex-col items-start gap-3 rounded-lg border border-border p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-sm font-medium">Role-Based Access Control</p>
                   <p className="text-xs text-muted-foreground">Your role: <Badge variant="secondary" className="capitalize">{activeMembership?.role}</Badge></p>
                 </div>
               </div>
-              <div className="flex items-center justify-between p-4 rounded-lg border border-border">
+              <div className="flex flex-col items-start gap-3 rounded-lg border border-border p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-sm font-medium">API Key Security</p>
                   <p className="text-xs text-muted-foreground">API keys are stored server-side only, never in frontend code</p>
