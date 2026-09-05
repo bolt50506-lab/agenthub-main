@@ -1,36 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
-import {
-  generateAIResponseWithFallback,
-  type ProviderConfig,
-} from '@/lib/ai/providers';
+import { generateAIResponseWithFallback, type ProviderConfig } from '@/lib/ai/providers';
 import { shouldReplyInGroup } from '@/lib/group-rules';
 import { detectAppointmentRequest } from '@/lib/appointments';
 import { buildLanguageInstruction, detectReplyLanguage } from '@/lib/ai/language';
 
 export const dynamic = 'force-dynamic';
 
-/*
-|--------------------------------------------------------------------------
-| Helpers
-|--------------------------------------------------------------------------
-*/
-
-function isWhatsAppGroup(from: string) {
-  return from.endsWith('@g.us');
-}
-
-function isWhatsAppLid(from: string) {
-  return from.endsWith('@lid');
-}
-
+function isWhatsAppGroup(from: string) { return from.endsWith('@g.us'); }
+function isWhatsAppLid(from: string) { return from.endsWith('@lid'); }
 function resolvePhoneNumber(from: string, phoneNumberFromBody: string) {
   if (phoneNumberFromBody) return phoneNumberFromBody;
   if (isWhatsAppLid(from)) return null;
   const derived = from.replace('@s.whatsapp.net', '').replace('@c.us', '').trim();
   return derived || null;
 }
-
 function limitText(text: string, maxLength?: number | null) {
   if (!maxLength || maxLength <= 0 || text.length <= maxLength) return text;
   return text.slice(0, maxLength).trim();
@@ -50,18 +34,12 @@ export async function POST(req: NextRequest) {
     const transcriptionModel = typeof body.transcription_model === 'string' && body.transcription_model.trim() ? body.transcription_model.trim() : null;
 
     console.log('[WhatsApp API] Incoming message:', { sessionId, from, message, pushName, whatsappMessageId, inputType, transcriptionProvider, transcriptionModel });
-
     if (!sessionId) return NextResponse.json({ success: false, reply: null, error: 'Missing session_id' }, { status: 400 });
     if (!from) return NextResponse.json({ success: false, reply: null, error: 'Missing sender' }, { status: 400 });
     if (!message) return NextResponse.json({ success: false, reply: null, error: 'Missing message' }, { status: 400 });
 
     const supabase = createServiceClient();
-    const { data: whatsappSession, error: sessionError } = await supabase
-      .from('whatsapp_sessions')
-      .select('id, business_id, integration_id, session_id')
-      .eq('session_id', sessionId)
-      .maybeSingle();
-
+    const { data: whatsappSession, error: sessionError } = await supabase.from('whatsapp_sessions').select('id, business_id, integration_id, session_id').eq('session_id', sessionId).maybeSingle();
     if (sessionError) return NextResponse.json({ success: false, reply: null, error: sessionError.message }, { status: 500 });
     if (!whatsappSession) return NextResponse.json({ success: false, reply: null, error: 'WhatsApp session not found' }, { status: 404 });
     const businessId = whatsappSession.business_id;
@@ -83,15 +61,10 @@ export async function POST(req: NextRequest) {
     const voiceCloneFallbackEnabled = typeof voiceConfig.voice_clone_fallback_enabled === 'boolean' ? voiceConfig.voice_clone_fallback_enabled : true;
     const rawVoiceCloneFallbackTimeout = typeof voiceConfig.voice_clone_fallback_timeout_seconds === 'number' ? voiceConfig.voice_clone_fallback_timeout_seconds : 20;
     const voiceCloneFallbackTimeoutSeconds = Math.min(60, Math.max(5, Math.round(rawVoiceCloneFallbackTimeout)));
-    console.log('[WhatsApp API] Voice reply mode resolved:', { configured_mode: configuredMode || null, resolved_mode: voiceReplyMode });
 
-    const { data: business, error: businessError } = await supabase
-      .from('businesses')
-      .select('id, name, industry, description, website, phone, address, timezone, working_hours')
-      .eq('id', businessId).maybeSingle();
+    const { data: business, error: businessError } = await supabase.from('businesses').select('id, name, industry, description, website, phone, address, timezone, working_hours').eq('id', businessId).maybeSingle();
     if (businessError) return NextResponse.json({ success: false, reply: null, error: businessError.message }, { status: 500 });
     if (!business) return NextResponse.json({ success: false, reply: null, error: 'Business not found' }, { status: 404 });
-
     const { data: defaultVoiceProfile } = await supabase.from('voice_profiles').select('id').eq('business_id', businessId).eq('is_default', true).eq('status', 'active').maybeSingle();
     const voiceCloneEnabled = !!defaultVoiceProfile?.id;
 
@@ -111,7 +84,6 @@ export async function POST(req: NextRequest) {
     }
 
     const { data: agent } = await supabase.from('agents').select('id, business_id, name, purpose, description, communication_style, primary_goal, supported_languages, status, ai_provider, knowledge_source_ids, enabled_capabilities').eq('business_id', businessId).eq('status', 'active').limit(1).maybeSingle();
-
     let groupRule: any = null;
     if (isGroup) {
       const { data: groupRules } = await supabase.from('group_rules').select('id, business_id, agent_id, group_ai_enabled, response_mode, allowed_category_ids, allowed_product_ids, allow_price_list, allow_quotation, require_product_name, response_language, max_response_length, custom_rules').eq('business_id', businessId).maybeSingle();
@@ -126,7 +98,6 @@ export async function POST(req: NextRequest) {
       const { data: settings } = await supabase.from('agent_settings').select('id, agent_id, business_id, tone, greeting_behavior, auto_create_leads, appointments_enabled, auto_followups_enabled, max_response_length, response_language, custom_instructions').eq('business_id', businessId).eq('agent_id', agent.id).maybeSingle();
       agentSettings = settings;
     }
-
     const { data: products } = await supabase.from('products').select('id, business_id, category_id, name, description, price, currency, availability, status').eq('business_id', businessId).eq('status', 'active').limit(100);
     const { data: knowledgeItems } = await supabase.from('knowledge_items').select('id, business_id, title, category, content, tags, metadata, status').eq('business_id', businessId).eq('status', 'active').limit(50);
     const { data: subscriptionPlans } = await supabase.from('subscription_plans').select('name, description, price_cents, yearly_price_cents, currency, billing_period, features, is_active, sort_order').eq('is_active', true).order('sort_order', { ascending: true });
@@ -177,8 +148,6 @@ export async function POST(req: NextRequest) {
     const { error: incomingMessageError } = await supabase.from('messages').insert({ business_id: businessId, conversation_id: conversation.id, sender_type: 'customer', sender_id: customer.id, content: message, content_type: 'text', is_inbound: true, metadata: { channel: 'whatsapp', whatsapp_id: from, whatsapp_message_id: whatsappMessageId, session_id: sessionId, input_type: inputType, ...(inputType === 'voice' ? { transcription_provider: transcriptionProvider, transcription_model: transcriptionModel } : {}) } });
     if (incomingMessageError) console.error('[WhatsApp API] Incoming message save error:', incomingMessageError);
 
-    // HUMAN TAKEOVER IS PERSISTENT. A manual business reply is the only way to enter this state;
-    // Resume AI is the only way out. Never auto-expire human takeover after 2 minutes.
     if (conversation.human_takeover === true) {
       console.log('[WhatsApp API] Human takeover active; saved customer message and skipped AI:', conversation.id);
       return NextResponse.json({ success: true, reply: null, ignored: true, human_takeover: true, reason: 'Human takeover active', conversation_id: conversation.id, customer_id: customer.id });
@@ -198,7 +167,6 @@ export async function POST(req: NextRequest) {
         lead = newLead;
       }
     }
-
     if (lead && agentSettings?.auto_followups_enabled === true && conversation.human_takeover !== true) {
       const followUpAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
       const { data: existingAutoFollowUp } = await supabase.from('follow_up_tasks').select('id').eq('business_id', businessId).eq('lead_id', lead.id).eq('status', 'pending').eq('notes', 'auto:lead-checkin').maybeSingle();
@@ -218,10 +186,8 @@ export async function POST(req: NextRequest) {
     const customerLanguage = detectReplyLanguage(message);
     const languageInstruction = buildLanguageInstruction(message);
     console.log('[WhatsApp API] Detected customer language:', customerLanguage);
-
     const systemPrompt = `You are the official WhatsApp assistant for ${business.name}.\n\nYou represent THIS business only.\n\nBUSINESS INFORMATION:\nBusiness Name: ${business.name}\nIndustry: ${business.industry || 'Not specified'}\nBusiness Description: ${business.description || 'Not specified'}\nWebsite: ${business.website || 'Not provided'}\nBusiness Phone: ${business.phone || 'Not provided'}\nBusiness Address: ${business.address || 'Not provided'}\n\nAGENT INFORMATION:\nAgent Name: ${agent?.name || `${business.name} Assistant`}\nAgent Purpose: ${agent?.purpose || 'Help customers and answer business questions'}\nAgent Description: ${agent?.description || 'Not provided'}\nCommunication Style: ${agent?.communication_style || 'Professional'}\nPrimary Goal: ${agent?.primary_goal || 'Help customers effectively'}\n\nAGENT SETTINGS:\nTone: ${agentSettings?.tone || 'professional'}\nResponse Language Setting: ${agentSettings?.response_language || 'English'}\nGreeting Behavior: ${agentSettings?.greeting_behavior || 'Natural'}\nCustom Instructions: ${agentSettings?.custom_instructions || 'None'}\n\nBUSINESS PRODUCTS:\n${productsContext}\n\nBUSINESS KNOWLEDGE:\n${knowledgeContext}\n\nLIVE SUBSCRIPTION PLANS AND PRICING:\n${subscriptionPlansContext}\n\nLANGUAGE OVERRIDE FOR THIS MESSAGE — HIGHEST PRIORITY:\n${languageInstruction}\nDetected customer language: ${customerLanguage}\nThe customer's current language overrides the dashboard/default response language. If the customer uses Roman Urdu, every normal customer-facing sentence must use Latin/English letters; do not answer in Urdu Arabic script. If the customer uses English, answer in English. If the customer uses Urdu script, answer in Urdu script. If mixed, naturally preserve the mix. Do not translate the customer's Roman Urdu into English-only.\n\nIMPORTANT RULES:\n- Represent ${business.name}, not AgentHub AI.\n- Never introduce yourself as AgentHub AI.\n- Never mention internal systems, APIs, AI providers, Gemini, Groq, Ollama, or databases.\n- Only use products, knowledge, prices and policies belonging to ${business.name}.\n- Never invent missing information or prices.\n- If an exact price is available, state it directly.\n- Be helpful, professional and natural.\n- Keep replies suitable for WhatsApp and avoid unnecessary long explanations.\n- Match the customer's language and conversational style.\n- Never claim an action was completed unless it actually happened.\n- Do not restart an existing conversation with a generic greeting.\n\nConversation behavior:\n- Match the customer's energy and pace.\n- Never repeat information already given unless asked.\n- If the customer sounds frustrated or asks for a human, acknowledge that plainly and let a team member follow up.\n- Stay in character as one consistent assistant.\n- Use the recent message history to understand short replies and references.\n`.trim();
 
-    console.log('[WhatsApp API] Sending message to AI...');
     const aiResponse = await generateAIResponseWithFallback({ messages: conversationHistory, systemPrompt, temperature: 0.7, maxTokens: 1024, businessId }, providerConfigs);
     if (aiResponse.error || !aiResponse.content?.trim()) return NextResponse.json({ success: false, reply: 'Sorry, I am temporarily unable to process your message. Please try again in a moment.', error: aiResponse.error || 'AI returned an empty response' }, { status: 503 });
 
@@ -231,7 +197,6 @@ export async function POST(req: NextRequest) {
     const replyDeniesVoiceFeature = /\b(not available|unavailable|don't have|do not have|doesn't have|not support|doesn't support|cannot support|no voice|feature.*not)\b/i.test(finalReply);
     if (asksAboutVoiceFeature && replyDeniesVoiceFeature) finalReply = customerLanguage === 'roman_urdu' || customerLanguage === 'mixed' ? 'Ji haan, AgentHub WhatsApp AI mein voice replies available hain. Dashboard se aap Text only, Voice only, Text and Voice, ya Random reply mode select kar sakte hain.' : customerLanguage === 'urdu' ? 'جی ہاں، AgentHub WhatsApp AI میں وائس ریپلائز دستیاب ہیں۔ ڈیش بورڈ سے آپ Text only، Voice only، Text and Voice، یا Random reply mode منتخب کر سکتے ہیں۔' : 'Yes, AgentHub WhatsApp AI supports voice replies. From the dashboard you can choose Text only, Voice only, Text and Voice, or Random reply mode.';
 
-    // Race guard: a human may have replied while the AI provider was generating.
     const { data: latestConversation } = await supabase.from('conversations').select('human_takeover, ai_enabled').eq('id', conversation.id).maybeSingle();
     if (latestConversation?.human_takeover === true || latestConversation?.ai_enabled === false) {
       console.log('[WhatsApp API] Human takeover/AI disabled during generation; suppressing AI reply:', conversation.id);
@@ -240,7 +205,7 @@ export async function POST(req: NextRequest) {
 
     let voiceReply: string | null = null;
     if (voiceReplyMode !== 'disabled' && voiceReplyMode !== 'text_only') {
-      if (/\p{Arabic}/u.test(finalReply)) voiceReply = finalReply;
+      if (detectReplyLanguage(finalReply) === 'urdu') voiceReply = finalReply;
       else if (customerLanguage === 'roman_urdu' || customerLanguage === 'mixed') {
         const voicePrompt = `Convert this customer-facing reply into natural spoken Urdu for voice playback. Preserve meaning exactly. Do not add information. Return only Urdu script.\n\n${finalReply}`;
         const voiceResponse = await generateAIResponseWithFallback({ messages: [{ role: 'user', content: voicePrompt }], systemPrompt: 'Return only natural Urdu script suitable for spoken voice. Do not explain.', temperature: 0.2, maxTokens: 1024, businessId }, providerConfigs);
