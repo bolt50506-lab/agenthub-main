@@ -13,7 +13,7 @@ import {
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import {
   Shield, LayoutDashboard, Building, Users, Bot, Plug, BarChart3,
-  FileText, Settings, Menu, LogOut, ChevronLeft, Moon, Sun, Bell, Mic2, FileSignature,
+  FileText, Settings, Menu, LogOut, ChevronLeft, Moon, Sun, Bell, Mic2, FileSignature, CreditCard,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 
@@ -26,6 +26,7 @@ const ADMIN_NAV = [
   { href: '/admin/voice-clone-agreements', label: 'Voice Clone Agreements', icon: FileSignature },
   { href: '/admin/integrations', label: 'Integrations', icon: Plug },
   { href: '/admin/usage', label: 'Usage', icon: BarChart3 },
+  { href: '/admin/payments', label: 'Payment Approvals', icon: CreditCard },
   { href: '/admin/logs', label: 'System Logs', icon: FileText },
   { href: '/admin/settings', label: 'Platform Settings', icon: Settings },
 ];
