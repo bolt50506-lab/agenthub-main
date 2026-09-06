@@ -3,6 +3,8 @@ import type { SubscriptionPlan, BusinessSubscription } from '@/lib/types/databas
 
 export type PlanLimitType =
   | 'max_agents'
+  | 'max_conversations'
+  | 'max_ai_usage_per_month'
   | 'max_team_members'
   | 'max_leads'
   | 'max_appointments'
