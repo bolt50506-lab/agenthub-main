@@ -184,7 +184,17 @@ export async function POST(req: NextRequest) {
     }
 
     const { error: incomingMessageError } = await supabase.from('messages').insert({ business_id: businessId, conversation_id: conversation.id, sender_type: 'customer', sender_id: customer.id, content: message, content_type: 'text', is_inbound: true, metadata: { channel: 'whatsapp', whatsapp_id: from, whatsapp_message_id: whatsappMessageId, session_id: sessionId, input_type: inputType, ...(inputType === 'voice' ? { transcription_provider: transcriptionProvider, transcription_model: transcriptionModel } : {}) } });
-    if (incomingMessageError) console.error('[WhatsApp API] Incoming message save error:', incomingMessageError);
+    if (incomingMessageError) {
+      // The database has a unique inbound WhatsApp message id guard. A second
+      // concurrent webhook for the same message must stop here and must never
+      // continue into AI generation or delivery.
+      if (whatsappMessageId && incomingMessageError.code === '23505') {
+        console.log('[WhatsApp API] Duplicate inbound message claimed by another request:', whatsappMessageId);
+        return NextResponse.json({ success: true, reply: null, ignored: true, reason: 'Duplicate message', conversation_id: conversation.id, customer_id: customer.id });
+      }
+      console.error('[WhatsApp API] Incoming message save error:', incomingMessageError);
+      return NextResponse.json({ success: false, reply: null, error: incomingMessageError.message }, { status: 500 });
+    }
 
     if (conversation.human_takeover === true) {
       console.log('[WhatsApp API] Human takeover active; saved customer message and skipped AI:', conversation.id);
