@@ -38,9 +38,27 @@ export async function GET(req: NextRequest) {
 
   const config = (data.config ?? {}) as Record<string, unknown>;
 
+  // Customer-facing identity is taken from the active agent's human name.
+  // The AI provider remains separate from the identity shown in chat.
+  const { data: activeAgent } = await supabase
+    .from('agents')
+    .select('id, name, purpose')
+    .eq('business_id', businessId)
+    .eq('status', 'active')
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  const agentName = activeAgent?.name?.trim() || '';
+  const configuredTitle = typeof config.widget_title === 'string' && config.widget_title.trim()
+    ? config.widget_title.trim()
+    : '';
+
   return NextResponse.json({
     enabled: true,
-    title: typeof config.widget_title === 'string' && config.widget_title.trim() ? config.widget_title.trim() : 'AI Assistant',
+    agentName: agentName || null,
+    agentPurpose: activeAgent?.purpose || null,
+    title: agentName || configuredTitle || 'AI Assistant',
     welcomeMessage: typeof config.welcome_message === 'string' && config.welcome_message.trim()
       ? config.welcome_message.trim()
       : 'Hi! 👋 How can I help you today?',
