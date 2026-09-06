@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import { supabase } from '@/lib/supabase/client';
+import { checkPlanLimit } from '@/lib/plan-limits';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -39,11 +40,18 @@ export default function AgentsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [agentLimit, setAgentLimit] = useState<{ current: number; max: number; allowed: boolean } | null>(null);
 
   const [form, setForm] = useState({
     name: '', purpose: 'Sales', description: '', communication_style: 'professional',
     primary_goal: 'sales', supported_languages: 'English', ai_provider: 'gemini',
   });
+
+  const refreshAgentLimit = async () => {
+    if (!activeBusiness) return;
+    const result = await checkPlanLimit(activeBusiness.id, 'max_agents');
+    if (!result.error) setAgentLimit({ current: result.current, max: result.max, allowed: result.allowed });
+  };
 
   useEffect(() => {
     if (!activeBusiness) return;
@@ -54,6 +62,7 @@ export default function AgentsPage() {
         .eq('business_id', activeBusiness.id)
         .order('created_at', { ascending: false });
       setAgents(data as Agent[] ?? []);
+      await refreshAgentLimit();
       setLoading(false);
     })();
   }, [activeBusiness]);
@@ -66,11 +75,30 @@ export default function AgentsPage() {
       .eq('business_id', activeBusiness.id)
       .order('created_at', { ascending: false });
     setAgents(data as Agent[] ?? []);
+    await refreshAgentLimit();
   };
 
   const handleCreate = async () => {
     if (!activeBusiness) return;
     setSubmitting(true);
+
+    const limit = await checkPlanLimit(activeBusiness.id, 'max_agents');
+    if (limit.error) {
+      setSubmitting(false);
+      toast({ title: 'Unable to check plan limit', description: limit.error, variant: 'destructive' });
+      return;
+    }
+    if (!limit.allowed) {
+      setSubmitting(false);
+      toast({
+        title: 'Agent limit reached',
+        description: `Your current plan allows ${limit.max} agent${limit.max === 1 ? '' : 's'}. Upgrade your plan to create another agent.`,
+        variant: 'destructive',
+      });
+      await refreshAgentLimit();
+      return;
+    }
+
     const { data, error } = await supabase
       .from('agents')
       .insert({
@@ -103,6 +131,18 @@ export default function AgentsPage() {
     }
 
     setSubmitting(false);
+
+    if (error || !data) {
+      const isLimitError = error?.message?.includes('PLAN_LIMIT_REACHED');
+      toast({
+        title: isLimitError ? 'Agent limit reached' : 'Agent creation failed',
+        description: isLimitError ? 'Your subscription plan does not allow another agent. Please upgrade your plan.' : (error?.message ?? 'Unable to create agent.'),
+        variant: 'destructive',
+      });
+      await fetchAgents();
+      return;
+    }
+
     setCreateOpen(false);
     setForm({ name: '', purpose: 'Sales', description: '', communication_style: 'professional', primary_goal: 'sales', supported_languages: 'English', ai_provider: 'gemini' });
     await fetchAgents();
@@ -133,10 +173,13 @@ export default function AgentsPage() {
       </div>
 
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">{agents.length} agent{agents.length !== 1 ? 's' : ''}</p>
+        <div className="text-sm text-muted-foreground">
+          <span>{agents.length} agent{agents.length !== 1 ? 's' : ''}</span>
+          {agentLimit && <span className="ml-2">· {agentLimit.current}/{agentLimit.max === -1 ? '∞' : agentLimit.max} plan limit</span>}
+        </div>
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
           <DialogTrigger asChild>
-            <Button className="gap-2"><Plus className="w-4 h-4" /> Create Agent</Button>
+            <Button className="gap-2" disabled={agentLimit !== null && !agentLimit.allowed} title={agentLimit && !agentLimit.allowed ? 'Agent limit reached — upgrade your plan' : undefined}><Plus className="w-4 h-4" /> Create Agent</Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
@@ -194,7 +237,7 @@ export default function AgentsPage() {
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
-              <Button onClick={handleCreate} disabled={submitting || !form.name}>
+              <Button onClick={handleCreate} disabled={submitting || !form.name || (agentLimit !== null && !agentLimit.allowed)}>
                 {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Create
               </Button>
             </DialogFooter>
