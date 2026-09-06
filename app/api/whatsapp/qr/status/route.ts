@@ -388,11 +388,20 @@ export async function POST(req: NextRequest) {
             'Failed updating integration:',
             integrationError
           );
+        } else {
+          const { error: linkError } = await supabase
+            .from('whatsapp_sessions')
+            .update({ integration_id: existingIntegration.id })
+            .eq('id', session.id);
+
+          if (linkError) {
+            console.error('Failed linking WhatsApp session to integration:', linkError);
+          }
         }
 
       } else {
 
-        const { error: integrationError } =
+        const { data: createdIntegration, error: integrationError } =
           await supabase
             .from('integrations')
             .insert({
@@ -418,13 +427,24 @@ export async function POST(req: NextRequest) {
 
               last_connected_at:
                 now,
-            });
+            })
+            .select('id')
+            .maybeSingle();
 
         if (integrationError) {
           console.error(
             'Failed creating integration:',
             integrationError
           );
+        } else if (createdIntegration?.id) {
+          const { error: linkError } = await supabase
+            .from('whatsapp_sessions')
+            .update({ integration_id: createdIntegration.id })
+            .eq('id', session.id);
+
+          if (linkError) {
+            console.error('Failed linking WhatsApp session to new integration:', linkError);
+          }
         }
       }
     }
