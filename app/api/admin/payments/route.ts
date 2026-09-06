@@ -8,17 +8,10 @@ async function requireAdmin(req: NextRequest) {
   const authorization = req.headers.get('authorization') || '';
   const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
   if (!token) return null;
-
   const supabase = createServiceClient();
   const { data: { user }, error: userError } = await supabase.auth.getUser(token);
   if (userError || !user) return null;
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('is_super_admin')
-    .eq('id', user.id)
-    .maybeSingle();
-
+  const { data: profile } = await supabase.from('profiles').select('is_super_admin').eq('id', user.id).maybeSingle();
   return profile?.is_super_admin ? user : null;
 }
 
@@ -36,127 +29,49 @@ export async function GET(req: NextRequest) {
   const admin = await requireAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const supabase = createServiceClient();
-  // Do not depend on a nested PostgREST relationship here. A submitted proof is
-  // identified directly by submitted_at + screenshot path and must always appear.
-  const { data, error } = await supabase
-    .from('public_checkout_orders')
-    .select('id,order_number,customer_name,customer_email,business_name,country_code,currency,amount_cents,payment_method,status,payment_screenshot_path,payment_reference,submitted_at,created_at,plan_id')
-    .not('submitted_at', 'is', null)
-    .not('payment_screenshot_path', 'is', null)
-    .order('submitted_at', { ascending: false });
-
-  if (error) return NextResponse.json(
-    { error: error.message },
-    { status: 500, headers: { 'Cache-Control': 'no-store, max-age=0' } }
-  );
-
+  const { data, error } = await supabase.from('public_checkout_orders').select('id,order_number,customer_name,customer_email,business_name,whatsapp_number,country_code,currency,amount_cents,payment_method,status,payment_screenshot_path,payment_reference,submitted_at,created_at,plan_id').not('submitted_at', 'is', null).not('payment_screenshot_path', 'is', null).order('submitted_at', { ascending: false });
+  if (error) return NextResponse.json({ error: error.message }, { status: 500, headers: { 'Cache-Control': 'no-store, max-age=0' } });
   const planIds = [...new Set((data || []).map((row: any) => row.plan_id).filter(Boolean))];
-  const { data: plans, error: plansError } = planIds.length
-    ? await supabase.from('subscription_plans').select('id,name,slug').in('id', planIds)
-    : { data: [], error: null };
-
-  if (plansError) return NextResponse.json(
-    { error: plansError.message },
-    { status: 500, headers: { 'Cache-Control': 'no-store, max-age=0' } }
-  );
-
+  const { data: plans, error: plansError } = planIds.length ? await supabase.from('subscription_plans').select('id,name,slug').in('id', planIds) : { data: [], error: null };
+  if (plansError) return NextResponse.json({ error: plansError.message }, { status: 500 });
   const planMap = new Map((plans || []).map((plan: any) => [plan.id, { name: plan.name, slug: plan.slug }]));
-
   const rows = await Promise.all((data || []).map(async (row: any) => {
-    let screenshotUrl: string | null = null;
-    if (row.payment_screenshot_path) {
-      const signed = await supabase.storage.from('payment-proofs').createSignedUrl(row.payment_screenshot_path, 60 * 10);
-      screenshotUrl = signed.data?.signedUrl || null;
-    }
-
-    return {
-      ...row,
-      subscription_plans: planMap.get(row.plan_id) || null,
-      screenshotUrl,
-    };
+    const signed = row.payment_screenshot_path ? await supabase.storage.from('payment-proofs').createSignedUrl(row.payment_screenshot_path, 600) : { data: null };
+    return { ...row, subscription_plans: planMap.get(row.plan_id) || null, screenshotUrl: signed.data?.signedUrl || null };
   }));
-
-  return NextResponse.json(
-    { payments: rows, count: rows.length },
-    { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' } }
-  );
+  return NextResponse.json({ payments: rows, count: rows.length }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' } });
 }
 
 export async function POST(req: NextRequest) {
   const admin = await requireAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const body = await req.json();
-  const orderId = String(body.orderId || '');
-  const action = String(body.action || '');
-  const reason = String(body.reason || '').trim();
+  const body = await req.json(); const orderId = String(body.orderId || ''); const action = String(body.action || ''); const reason = String(body.reason || '').trim();
   if (!orderId || !['approve','reject'].includes(action)) return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });
-
   const supabase = createServiceClient();
-  const { data: order, error } = await supabase
-    .from('public_checkout_orders').select('*').eq('id', orderId).maybeSingle();
+  const { data: order, error } = await supabase.from('public_checkout_orders').select('*').eq('id', orderId).maybeSingle();
   if (error || !order) return NextResponse.json({ error: 'Payment order not found.' }, { status: 404 });
   if (order.status !== 'pending_review') return NextResponse.json({ error: 'This payment is no longer pending review.' }, { status: 409 });
-
   if (action === 'reject') {
-    await supabase.from('public_checkout_orders').update({
-      status: 'rejected', rejection_reason: reason || 'Payment could not be verified.',
-      reviewed_at: new Date().toISOString(), reviewed_by: admin.id,
-    }).eq('id', order.id);
+    await supabase.from('public_checkout_orders').update({ status: 'rejected', rejection_reason: reason || 'Payment could not be verified.', reviewed_at: new Date().toISOString(), reviewed_by: admin.id }).eq('id', order.id);
     return NextResponse.json({ ok: true, status: 'rejected' });
   }
-
   try {
     const password = decryptPassword(order.encrypted_password);
     const { data: existing } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
     const already = existing?.users?.find((u) => u.email?.toLowerCase() === order.customer_email.toLowerCase());
     if (already) throw new Error('An AgentHub account already exists with this email.');
-
-    const { data: created, error: userError } = await supabase.auth.admin.createUser({
-      email: order.customer_email,
-      password,
-      email_confirm: true,
-      user_metadata: { full_name: order.customer_name },
-    });
+    const { data: created, error: userError } = await supabase.auth.admin.createUser({ email: order.customer_email, password, email_confirm: true, user_metadata: { full_name: order.customer_name } });
     if (userError || !created.user) throw new Error(userError?.message || 'Unable to create customer account');
-
-    const { data: business, error: businessError } = await supabase.from('businesses').insert({
-      name: order.business_name,
-      subscription_plan_id: order.plan_id,
-      subscription_status: 'active',
-      subscription_started_at: new Date().toISOString(),
-      country: order.country_code,
-      status: 'active',
-    }).select('id').single();
+    const { data: business, error: businessError } = await supabase.from('businesses').insert({ name: order.business_name, subscription_plan_id: order.plan_id, subscription_status: 'active', subscription_started_at: new Date().toISOString(), country: order.country_code, status: 'active' }).select('id').single();
     if (businessError || !business) throw new Error(businessError?.message || 'Unable to create business');
-
-    await supabase.from('profiles').upsert({
-      id: created.user.id, email: order.customer_email, full_name: order.customer_name,
-      active_business_id: business.id, onboarding_completed: false,
-    }, { onConflict: 'id' });
-
-    await supabase.from('business_members').insert({
-      business_id: business.id, user_id: created.user.id, role: 'owner', status: 'active',
-    });
-
-    const endDate = new Date();
-    if (order.billing_cycle === 'yearly') endDate.setFullYear(endDate.getFullYear() + 1);
-    else endDate.setMonth(endDate.getMonth() + 1);
-
-    await supabase.from('business_subscriptions').insert({
-      business_id: business.id, plan_id: order.plan_id, status: 'active',
-      billing_cycle: order.billing_cycle, start_date: new Date().toISOString(), end_date: endDate.toISOString(),
-    });
-
-    await supabase.from('public_checkout_orders').update({
-      status: 'fulfilled', business_id: business.id, fulfilled_at: new Date().toISOString(),
-      reviewed_at: new Date().toISOString(), reviewed_by: admin.id,
-    }).eq('id', order.id);
-
+    await supabase.from('profiles').upsert({ id: created.user.id, email: order.customer_email, full_name: order.customer_name, active_business_id: business.id, onboarding_completed: false }, { onConflict: 'id' });
+    await supabase.from('business_members').insert({ business_id: business.id, user_id: created.user.id, role: 'owner', status: 'active' });
+    const endDate = new Date(); if (order.billing_cycle === 'yearly') endDate.setFullYear(endDate.getFullYear() + 1); else endDate.setMonth(endDate.getMonth() + 1);
+    await supabase.from('business_subscriptions').insert({ business_id: business.id, plan_id: order.plan_id, status: 'active', billing_cycle: order.billing_cycle, start_date: new Date().toISOString(), end_date: endDate.toISOString() });
+    await supabase.from('public_checkout_orders').update({ status: 'fulfilled', business_id: business.id, fulfilled_at: new Date().toISOString(), reviewed_at: new Date().toISOString(), reviewed_by: admin.id }).eq('id', order.id);
     return NextResponse.json({ ok: true, status: 'fulfilled' });
   } catch (e) {
-    await supabase.from('public_checkout_orders').update({
-      status: 'pending_review', rejection_reason: e instanceof Error ? e.message : 'Activation failed.',
-    }).eq('id', order.id);
+    await supabase.from('public_checkout_orders').update({ status: 'pending_review', rejection_reason: e instanceof Error ? e.message : 'Activation failed.' }).eq('id', order.id);
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Unable to activate subscription.' }, { status: 500 });
   }
 }
