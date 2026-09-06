@@ -23,6 +23,15 @@ function cleanTranscript(value: string) {
     .trim();
 }
 
+function normalizeSpeechLanguage(value: unknown, transcript: string) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (raw === 'ur' || raw === 'urd' || raw.startsWith('urdu')) return 'ur';
+  if (raw === 'en' || raw === 'eng' || raw.startsWith('english')) return 'en';
+  if (raw === 'pa' || raw === 'pan' || raw.startsWith('punjabi')) return 'pa';
+  if (/[\u0600-\u06ff]/.test(transcript)) return 'ur';
+  return 'unknown';
+}
+
 async function transcribeWithGemini(
   audioBase64: string,
   mimeType: string,
@@ -44,7 +53,7 @@ async function transcribeWithGemini(
           role: 'user',
           parts: [
             {
-              text: `Transcribe this customer voice message exactly. The speaker may use Urdu, Roman Urdu, Punjabi, Roman Punjabi, English, or a mixture. Preserve the words as spoken and preserve Roman script when the speaker is using Roman Urdu/Punjabi. Do not translate, summarize, answer the customer, add punctuation-heavy rewriting, or invent missing words. Return only the transcript.`,
+              text: `Transcribe this customer voice message exactly. The speaker may use Urdu, Roman Urdu, Punjabi, Roman Punjabi, English, or a mixture. Preserve the words as spoken and preserve Roman script when the speaker is using Roman Urdu/Punjabi. Do not translate, summarize, answer the customer, or invent missing words. Also identify the primary spoken language from the audio itself, not from the script used by the transcript. Return ONLY valid JSON in this exact shape: {"transcript":"...","language":"ur|en|pa|unknown"}.`,
             },
             {
               inlineData: {
@@ -58,6 +67,7 @@ async function transcribeWithGemini(
           temperature: 0,
           maxOutputTokens: 2048,
           thinkingConfig: { thinkingBudget: 0 },
+          responseMimeType: 'application/json',
         },
       }),
     }
@@ -70,14 +80,24 @@ async function transcribeWithGemini(
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
   };
 
-  const transcript = cleanTranscript(
-    data.candidates?.[0]?.content?.parts
-      ?.map((part) => part.text || '')
-      .join('') || ''
-  );
+  const modelOutput = data.candidates?.[0]?.content?.parts
+    ?.map((part) => part.text || '')
+    .join('') || '';
 
+  let parsed: { transcript?: string; language?: string } = {};
+  try {
+    parsed = JSON.parse(modelOutput);
+  } catch {
+    parsed = { transcript: modelOutput };
+  }
+
+  const transcript = cleanTranscript(parsed.transcript || '');
   if (!transcript) throw new Error('Gemini returned an empty transcript');
-  return transcript;
+
+  return {
+    transcript,
+    language: normalizeSpeechLanguage(parsed.language, transcript),
+  };
 }
 
 async function transcribeWithGroq(
@@ -115,10 +135,14 @@ async function transcribeWithGroq(
   const raw = await response.text();
   if (!response.ok) throw new Error(`Groq transcription failed: ${response.status} ${raw.slice(0, 500)}`);
 
-  const data = JSON.parse(raw) as { text?: string };
+  const data = JSON.parse(raw) as { text?: string; language?: string };
   const transcript = cleanTranscript(data.text || '');
   if (!transcript) throw new Error('Groq returned an empty transcript');
-  return transcript;
+
+  return {
+    transcript,
+    language: normalizeSpeechLanguage(data.language, transcript),
+  };
 }
 
 export async function POST(req: NextRequest) {
@@ -142,7 +166,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'session_id and audio_base64 are required' }, { status: 400 });
     }
 
-    // Protect serverless memory/costs from accidentally forwarding huge media files.
     if (audioBase64.length > 12 * 1024 * 1024) {
       return NextResponse.json({ error: 'Voice message is too large to transcribe' }, { status: 413 });
     }
@@ -170,9 +193,6 @@ export async function POST(req: NextRequest) {
 
     const errors: string[] = [];
 
-    // Prefer Gemini for mixed Urdu/Punjabi/English audio because it can use
-    // the audio plus the explicit language-preservation instruction. Groq
-    // Whisper is an efficient fallback when configured.
     const ordered = [
       ...providers.filter((p) => p.provider === 'gemini'),
       ...providers.filter((p) => p.provider === 'groq'),
@@ -180,14 +200,21 @@ export async function POST(req: NextRequest) {
 
     for (const provider of ordered) {
       try {
-        const transcript = provider.provider === 'gemini'
+        const result = provider.provider === 'gemini'
           ? await transcribeWithGemini(audioBase64, mimeType, provider)
           : await transcribeWithGroq(audioBase64, mimeType, provider);
 
+        // The WhatsApp service already forwards `provider` unchanged to the
+        // incoming route. Encode the detected speech language in that field so
+        // we can preserve the language end-to-end without changing the public
+        // WhatsApp service API shape.
+        const providerWithLanguage = `${provider.provider}:${result.language}`;
+
         return NextResponse.json({
           success: true,
-          transcript,
-          provider: provider.provider,
+          transcript: result.transcript,
+          provider: providerWithLanguage,
+          speech_language: result.language,
           model: provider.provider === 'groq'
             ? 'whisper-large-v3-turbo'
             : provider.model || 'gemini-2.5-flash',
