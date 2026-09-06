@@ -5,7 +5,7 @@ const ROMAN_URDU_WORDS = new Set([
   'mujhe','mujhy','muj','mera','meri','mere','hum','ham','hamara','hamari','hamare','yeh','ye','woh','wo',
   'kya','kyun','kyu','kyunke','kab','kahan','kaise','kaisay','kaisa','kaisi','kaisy','kese','kesay',
   'kitna','kitni','kitne','kitnay','chahiye','batao','bataye','batain','btao','btaein','bata','batana',
-  'karna','karo','karein','karen','krna','krdo','kardo','kar','kr','ho','hai','hain','tha','thi','the',
+  'karna','karo','karein','karen','krna','krdo','kardo','kar','kr','kro','ho','hai','hain','tha','thi','the',
   'hoga','hogi','honge','sakta','sakti','sakte','mil','milega','milyga','aur','se','mein','main','mai',
   'par','pe','wala','wali','wale','nahi','nahin','nai','haan','han','ji','bhai','sir','madam',
   'apna','apni','iska','iski','iske','uska','uski','uske','yahan','wahan','abhi','phir','fir','toh','to',
@@ -38,9 +38,6 @@ export function detectReplyLanguage(text: string): ReplyLanguage {
   const romanScore = romanHits / tokens.length;
   const englishScore = englishHits / tokens.length;
 
-  // Roman Urdu often contains English business words such as price, CBC,
-  // available and test. Even one strong Roman Urdu marker should therefore
-  // outweigh generic English vocabulary in short WhatsApp messages.
   if (romanHits >= 2 && englishHits >= 2) return 'mixed';
   if (romanHits >= 1 && englishHits >= 2 && englishScore > romanScore * 2) return 'mixed';
   if (romanHits >= 1) return 'roman_urdu';
@@ -51,14 +48,29 @@ export function detectReplyLanguage(text: string): ReplyLanguage {
 
 export function buildLanguageInstruction(text: string): string {
   const language = detectReplyLanguage(text);
+  const voiceQuestion = /\b(voice|audio|voice note|voice reply|voice message)\b/i.test(text) &&
+    /\b(support|available|feature|reply|replies|message|messages|kar|karo|kro|karta|hota|hai|hain|nahi|nahin|can|does|do)\b/i.test(text);
+
   if (language === 'roman_urdu') {
-    return 'ABSOLUTE OUTPUT LANGUAGE RULE: Reply ONLY in natural Roman Urdu written with Latin letters. Never answer in English-only. Never use Urdu/Arabic script. English technical terms, brand names, product names, abbreviations, numbers and currency may remain unchanged, but every normal sentence around them must be Roman Urdu. The dashboard/default language setting is ignored for this message. Before returning, check: if the reply could pass as an English sentence, rewrite it into Roman Urdu. Return ONLY the customer-facing reply.';
+    const voiceRule = voiceQuestion
+      ? ' The customer is asking about voice capability. VOICE CAPABILITY IS AVAILABLE. Never say, imply, or apologize that voice support/voice replies are unavailable or unsupported. Answer the capability question truthfully: voice replies are supported when the configured delivery mode permits them.'
+      : '';
+    return 'ABSOLUTE OUTPUT LANGUAGE RULE: Reply ONLY in natural Roman Urdu written with Latin letters. Never answer in English-only. Never use Urdu/Arabic script. English technical terms, brand names, product names, abbreviations, numbers and currency may remain unchanged, but every normal sentence around them must be Roman Urdu. The dashboard/default language setting is ignored for this message. Before returning, check: if the reply could pass as an English sentence, rewrite it into Roman Urdu. Return ONLY the customer-facing reply.' + voiceRule;
   }
   if (language === 'urdu') {
-    return 'ABSOLUTE OUTPUT LANGUAGE RULE: Reply in Urdu script. Do not switch to English unless required for a product name, abbreviation, number or technical term. Return ONLY the customer-facing reply.';
+    const voiceRule = voiceQuestion
+      ? ' The customer is asking about voice capability. VOICE CAPABILITY IS AVAILABLE. Never say, imply, or apologize that voice support/voice replies are unavailable or unsupported. Answer the capability question truthfully: voice replies are supported when the configured delivery mode permits them.'
+      : '';
+    return 'ABSOLUTE OUTPUT LANGUAGE RULE: Reply in Urdu script. Do not switch to English unless required for a product name, abbreviation, number or technical term. Return ONLY the customer-facing reply.' + voiceRule;
   }
   if (language === 'mixed') {
-    return 'ABSOLUTE OUTPUT LANGUAGE RULE: Preserve the customer\'s natural English + Roman Urdu mixture. Do not convert their Roman Urdu into English-only and do not use Urdu/Arabic script unless the customer used it. Return ONLY the customer-facing reply.';
+    const voiceRule = voiceQuestion
+      ? ' The customer is asking about voice capability. VOICE CAPABILITY IS AVAILABLE. Never say, imply, or apologize that voice support/voice replies are unavailable or unsupported. Answer the capability question truthfully: voice replies are supported when the configured delivery mode permits them.'
+      : '';
+    return 'ABSOLUTE OUTPUT LANGUAGE RULE: Preserve the customer\'s natural English + Roman Urdu mixture. Do not convert their Roman Urdu into English-only and do not use Urdu/Arabic script unless the customer used it. Return ONLY the customer-facing reply.' + voiceRule;
+  }
+  if (voiceQuestion) {
+    return 'ABSOLUTE OUTPUT LANGUAGE RULE: Reply in English. Do not switch to Urdu or Roman Urdu unless the customer does. VOICE CAPABILITY IS AVAILABLE. Never say, imply, or apologize that voice support/voice replies are unavailable or unsupported. Answer the capability question truthfully: voice replies are supported when the configured delivery mode permits them. Return ONLY the customer-facing reply.';
   }
   return 'ABSOLUTE OUTPUT LANGUAGE RULE: Reply in English. Do not switch to Urdu or Roman Urdu unless the customer does. Return ONLY the customer-facing reply.';
 }
