@@ -345,7 +345,7 @@ export async function POST(req: NextRequest) {
       const { data: existingIntegration } =
         await supabase
           .from('integrations')
-          .select('id')
+          .select('id, config')
           .eq(
             'business_id',
             session.business_id
@@ -354,9 +354,21 @@ export async function POST(req: NextRequest) {
             'type',
             'whatsapp'
           )
+          .order('created_at', { ascending: true })
+          .limit(1)
           .maybeSingle();
 
       if (existingIntegration) {
+
+        // Never replace the full WhatsApp config here. QR status polling used
+        // to overwrite voice_reply_mode and other saved AI reply settings with
+        // only connection_method/phone_number, which made settings appear to
+        // reset after a page refresh.
+        const mergedConfig = {
+          ...((existingIntegration.config || {}) as Record<string, unknown>),
+          connection_method: 'qr_code',
+          phone_number: phone,
+        };
 
         const { error: integrationError } =
           await supabase
@@ -364,10 +376,7 @@ export async function POST(req: NextRequest) {
             .update({
               status: 'connected',
               last_connected_at: now,
-              config: {
-                connection_method: 'qr_code',
-                phone_number: phone,
-              },
+              config: mergedConfig,
             })
             .eq(
               'id',
