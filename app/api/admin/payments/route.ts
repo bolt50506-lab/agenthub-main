@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createDecipheriv, createHash } from 'crypto';
 import { createServiceClient } from '@/lib/supabase/server';
+import { activateCheckoutOrder } from '@/lib/payments/activate-checkout-order';
 
 export const runtime = 'nodejs';
 
@@ -15,15 +15,6 @@ async function requireAdmin(req: NextRequest) {
   return profile?.is_super_admin ? user : null;
 }
 
-function decryptPassword(value: string) {
-  const secret = process.env.CHECKOUT_ENCRYPTION_KEY;
-  if (!secret) throw new Error('Checkout encryption is not configured');
-  const [ivB64, tagB64, encryptedB64] = value.split('.');
-  const key = createHash('sha256').update(secret).digest();
-  const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(ivB64, 'base64'));
-  decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
-  return Buffer.concat([decipher.update(Buffer.from(encryptedB64, 'base64')), decipher.final()]).toString('utf8');
-}
 
 export async function GET(req: NextRequest) {
   const admin = await requireAdmin(req);
@@ -56,19 +47,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, status: 'rejected' });
   }
   try {
-    const password = decryptPassword(order.encrypted_password);
-    const { data: existing } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
-    const already = existing?.users?.find((u) => u.email?.toLowerCase() === order.customer_email.toLowerCase());
-    if (already) throw new Error('An AgentHub account already exists with this email.');
-    const { data: created, error: userError } = await supabase.auth.admin.createUser({ email: order.customer_email, password, email_confirm: true, user_metadata: { full_name: order.customer_name } });
-    if (userError || !created.user) throw new Error(userError?.message || 'Unable to create customer account');
-    const { data: business, error: businessError } = await supabase.from('businesses').insert({ name: order.business_name, subscription_plan_id: order.plan_id, subscription_status: 'active', subscription_started_at: new Date().toISOString(), country: order.country_code, status: 'active' }).select('id').single();
-    if (businessError || !business) throw new Error(businessError?.message || 'Unable to create business');
-    await supabase.from('profiles').upsert({ id: created.user.id, email: order.customer_email, full_name: order.customer_name, active_business_id: business.id, onboarding_completed: false }, { onConflict: 'id' });
-    await supabase.from('business_members').insert({ business_id: business.id, user_id: created.user.id, role: 'owner', status: 'active' });
-    const endDate = new Date(); if (order.billing_cycle === 'yearly') endDate.setFullYear(endDate.getFullYear() + 1); else endDate.setMonth(endDate.getMonth() + 1);
-    await supabase.from('business_subscriptions').insert({ business_id: business.id, plan_id: order.plan_id, status: 'active', billing_cycle: order.billing_cycle, start_date: new Date().toISOString(), end_date: endDate.toISOString() });
-    await supabase.from('public_checkout_orders').update({ status: 'fulfilled', business_id: business.id, fulfilled_at: new Date().toISOString(), reviewed_at: new Date().toISOString(), reviewed_by: admin.id }).eq('id', order.id);
+    await activateCheckoutOrder(supabase, order, admin.id);
     return NextResponse.json({ ok: true, status: 'fulfilled' });
   } catch (e) {
     await supabase.from('public_checkout_orders').update({ status: 'pending_review', rejection_reason: e instanceof Error ? e.message : 'Activation failed.' }).eq('id', order.id);
