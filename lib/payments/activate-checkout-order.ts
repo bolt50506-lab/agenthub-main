@@ -80,6 +80,7 @@ export async function activateCheckoutOrder(supabase: any, order: any, adminId: 
     if (subscriptionError || !subscription) throw new Error(subscriptionError?.message || 'Unable to activate subscription');
     subscriptionId = subscription.id;
     subscriptionEnd = subscription.end_date;
+    await supabase.from('businesses').update({ subscription_expires_at: subscription.end_date, subscription_status: 'active' }).eq('id', businessId);
   }
 
   const now = new Date().toISOString();
