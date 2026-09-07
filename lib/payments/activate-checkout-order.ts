@@ -85,8 +85,6 @@ export async function activateCheckoutOrder(supabase: any, order: any, adminId: 
 
   const now = new Date().toISOString();
 
-  // Always create a billing record for the approved subscription so the business
-  // can see exactly what was paid, for which period, and when the plan expires.
   if (!subscriptionId && businessId) {
     const { data: existingSubscription } = await supabase.from('business_subscriptions')
       .select('id,end_date').eq('business_id', businessId).maybeSingle();
@@ -114,7 +112,7 @@ export async function activateCheckoutOrder(supabase: any, order: any, adminId: 
       .select('id,invoice_number').maybeSingle();
 
     const receiptNumber = 'SUB-' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '-' + String(order.order_number || order.id).replace(/[^A-Za-z0-9]/g,'').slice(-8).toUpperCase();
-    await supabase.from('payment_receipts').upsert({
+    const { data: receipt, error: receiptError } = await supabase.from('payment_receipts').upsert({
       business_id: businessId,
       receipt_number: receiptNumber,
       subscription_invoice_id: invoice?.id || null,
@@ -124,8 +122,22 @@ export async function activateCheckoutOrder(supabase: any, order: any, adminId: 
       amount: Number(order.amount_cents || 0) / 100,
       currency: order.currency || 'USD',
       issued_at: now,
-      payload: { type: 'agenthub_subscription', order_number: order.order_number, invoice_number: invoice?.invoice_number || invoiceNumber, valid_until: subscriptionEnd },
-    }, { onConflict: 'business_id,receipt_number' });
+      payload: {
+        type: 'agenthub_subscription',
+        order_number: order.order_number,
+        invoice_number: invoice?.invoice_number || invoiceNumber,
+        business_name: order.business_name,
+        customer_name: order.customer_name,
+        customer_contact: order.whatsapp_number || order.customer_email,
+        plan_id: order.plan_id,
+        amount: Number(order.amount_cents || 0) / 100,
+        currency: order.currency || 'USD',
+        issued_at: now,
+        valid_until: subscriptionEnd,
+      },
+    }, { onConflict: 'business_id,receipt_number' })
+      .select('id,receipt_number').maybeSingle();
+    if (receiptError) throw new Error(receiptError.message);
 
     const { data: proof } = await supabase.from('payment_verifications')
       .select('channel,sender_phone,metadata').eq('order_id', order.id).order('created_at', { ascending: false }).limit(1).maybeSingle();
@@ -138,14 +150,18 @@ export async function activateCheckoutOrder(supabase: any, order: any, adminId: 
         recipient_address: recipientAddress,
         template_type: 'subscription_payment_receipt',
         payload: {
+          receipt_id: receipt?.id || null,
           receipt_number: receiptNumber,
           invoice_number: invoice?.invoice_number || invoiceNumber,
           amount: Number(order.amount_cents || 0) / 100,
           currency: order.currency || 'USD',
           business_name: order.business_name,
-          plan: order.plan_id,
+          customer_name: order.customer_name,
+          customer_contact: order.whatsapp_number || order.customer_email,
+          plan_id: order.plan_id,
           valid_until: subscriptionEnd,
-          message: 'Payment approved. Your AgentHub subscription is active. Your payment receipt is attached to your billing history.',
+          issued_at: now,
+          message: 'Payment approved. Your AgentHub subscription is active. Your payment receipt is attached below.',
         },
       });
     }
