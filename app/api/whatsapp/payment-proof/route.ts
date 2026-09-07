@@ -38,14 +38,30 @@ export async function POST(req: NextRequest) {
     // seller. The customer's future business_id does not exist until approval.
     // Therefore the safe pre-approval identity is the real WhatsApp sender number.
     // Never match a pending order by business name alone.
-    const { data: order } = await supabase
+    const pushName = String(body.push_name || '').trim();
+    let { data: order } = await supabase
       .from('public_checkout_orders')
-      .select('id,order_number,customer_name,customer_email,business_name,business_id,amount_cents,currency,payment_reference,status')
+      .select('id,order_number,customer_name,customer_email,business_name,business_id,amount_cents,currency,payment_reference,status,whatsapp_number')
       .eq('whatsapp_number', phone)
       .in('status', ['pending_payment','pending_review','rejected'])
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
+
+    // Backward-compatible fallback for orders created before WhatsApp number
+    // became mandatory. Only use it when the WhatsApp sender's push name matches
+    // exactly one still-pending checkout order, so we never guess between customers.
+    if (!order && pushName) {
+      const { data: legacyCandidates } = await supabase
+        .from('public_checkout_orders')
+        .select('id,order_number,customer_name,customer_email,business_name,business_id,amount_cents,currency,payment_reference,status,whatsapp_number')
+        .ilike('customer_name', pushName)
+        .is('whatsapp_number', null)
+        .in('status', ['pending_payment','pending_review','rejected'])
+        .order('created_at', { ascending: false })
+        .limit(2);
+      if ((legacyCandidates || []).length === 1) order = legacyCandidates![0] as any;
+    }
 
     if (messageId) {
       const { data: duplicate } = await supabase.from('payment_verifications').select('id,status').contains('metadata', { whatsapp_message_id: messageId }).maybeSingle();
@@ -64,7 +80,7 @@ export async function POST(req: NextRequest) {
       channel: 'whatsapp',
       session_id: sessionId,
       sender_phone: phone,
-      customer_name: order?.customer_name || String(body.push_name || '').trim() || null,
+      customer_name: order?.customer_name || pushName || null,
       screenshot_path: path,
       payment_reference: order?.payment_reference || null,
       amount: order?.amount_cents != null ? Number(order.amount_cents) / 100 : null,
