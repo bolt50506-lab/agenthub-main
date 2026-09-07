@@ -14,12 +14,9 @@
     "isolatedModules": true,
     "jsx": "preserve",
     "incremental": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
+    "plugins": [{ "name": "next" }],
     "paths": {
+      "@/lib/ai/providers": ["./lib/ai/universal-provider"],
       "@/*": ["./*"]
     }
   },
