@@ -21,7 +21,7 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet';
 import {
-  LayoutDashboard, Bot, MessageSquare, Users, Calendar, CheckSquare, ShoppingCart, CreditCard, BriefcaseBusiness, ReceiptText,
+  LayoutDashboard, Bot, MessageSquare, Users, Calendar, CheckSquare, ShoppingCart, CreditCard, ReceiptText,
   BookOpen, Package, Image, Plug, UserCog, BarChart3, Settings, Zap,
   Menu, LogOut, ChevronDown, Building, Shield, Moon, Sun, Bell, AlertCircle, Mic2, Activity,
 } from 'lucide-react';
@@ -35,7 +35,6 @@ const NAV_ITEMS = [
   { href: '/dashboard/conversations', label: 'Conversations', icon: MessageSquare },
   { href: '/dashboard/leads', label: 'Leads', icon: Users },
   { href: '/dashboard/appointments', label: 'Appointments', icon: Calendar },
-  { href: '/dashboard/services', label: 'Services', icon: BriefcaseBusiness },
   { href: '/dashboard/orders', label: 'Orders & Bookings', icon: ShoppingCart },
   { href: '/dashboard/payments', label: 'Customer Payments', icon: CreditCard },
   { href: '/dashboard/billing', label: 'My Billing & Receipts', icon: ReceiptText },
@@ -122,7 +121,6 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
   const SidebarContent = () => (
     <div className="flex flex-col h-full">
-      {/* Logo */}
       <div className="flex items-center gap-2 px-4 h-16 border-b border-border">
         <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
           <Bot className="w-5 h-5 text-primary-foreground" />
@@ -130,7 +128,6 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         <span className="text-lg font-bold tracking-tight">AgentHub</span>
       </div>
 
-      {/* Nav */}
       <nav className="flex-1 overflow-y-auto scrollbar-thin px-3 py-4 space-y-1">
         {NAV_ITEMS.map((item) => {
           const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href));
@@ -152,7 +149,6 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         })}
       </nav>
 
-      {/* Super Admin Link */}
       {profile.is_super_admin && (
         <div className="px-3 pb-2">
           <Link
@@ -166,7 +162,6 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         </div>
       )}
 
-      {/* Business Selector */}
       <div className="border-t border-border p-3">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -179,7 +174,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           <DropdownMenuContent className="w-64" align="start">
             <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            {businesses.map(({ business, membership }) => (
+            {businesses.map(({ business }) => (
               <DropdownMenuItem
                 key={business.id}
                 onClick={() => setActiveBusiness(business.id)}
@@ -193,7 +188,6 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         </DropdownMenu>
       </div>
 
-      {/* User Profile */}
       <div className="border-t border-border p-3">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -232,29 +226,20 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-[100dvh] w-full overflow-x-hidden bg-background">
-      {/* Desktop Sidebar */}
       <aside className="sticky top-0 hidden h-[100dvh] w-64 flex-col border-r border-border bg-card flex-shrink-0 lg:flex">
         <SidebarContent />
       </aside>
 
-      {/* Mobile Sidebar */}
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetContent side="left" className="w-[min(20rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] p-0">
           <SidebarContent />
         </SheetContent>
       </Sheet>
 
-      {/* Main Content */}
       <div className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
-        {/* Top Bar */}
         <header className="flex h-16 flex-shrink-0 items-center justify-between border-b border-border bg-card px-3 sm:px-4 lg:px-6">
           <div className="flex items-center gap-3">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="lg:hidden"
-              onClick={() => setMobileOpen(true)}
-            >
+            <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setMobileOpen(true)}>
               <Menu className="w-5 h-5" />
             </Button>
             <h1 className="text-lg font-semibold hidden sm:block">
@@ -272,7 +257,6 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        {/* Page Content */}
         <main className="mobile-safe flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 lg:p-6">
           {children}
         </main>
