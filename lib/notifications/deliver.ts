@@ -12,9 +12,10 @@ export function formatReceiptMessage(payload: any) {
   return lines.join('\n');
 }
 
-export async function deliverPendingNotifications(supabase: any, limit = 25) {
-  const { data: rows } = await supabase.from('channel_notifications')
-    .select('*').eq('status','pending').order('created_at',{ascending:true}).limit(limit);
+export async function deliverPendingNotifications(supabase: any, limit = 25, businessId?: string) {
+  let query = supabase.from('channel_notifications').select('*').eq('status','pending');
+  if (businessId) query = query.eq('business_id', businessId);
+  const { data: rows } = await query.order('created_at',{ascending:true}).limit(limit);
   let sent = 0, failed = 0;
 
   for (const row of rows || []) {
