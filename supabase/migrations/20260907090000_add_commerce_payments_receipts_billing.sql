@@ -204,3 +204,21 @@ BEGIN
 END $$;
 DROP TRIGGER IF EXISTS trg_customer_payments_appointments ON customer_payments;
 CREATE TRIGGER trg_customer_payments_appointments AFTER INSERT OR UPDATE OR DELETE ON customer_payments FOR EACH ROW EXECUTE FUNCTION update_appointment_payment_totals();
+
+CREATE OR REPLACE FUNCTION issue_customer_payment_receipt()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE v_receipt text;
+BEGIN
+  IF NEW.status='approved' AND (TG_OP='INSERT' OR OLD.status IS DISTINCT FROM 'approved') THEN
+    v_receipt := 'RCP-' || to_char(now(),'YYYYMMDD') || '-' || upper(substr(replace(NEW.id::text,'-',''),1,8));
+    INSERT INTO payment_receipts (business_id, receipt_number, customer_payment_id, customer_name, customer_contact, channel, amount, currency, payload)
+    VALUES (NEW.business_id, v_receipt, NEW.id, NEW.payer_name, NEW.payer_contact, NEW.channel, NEW.amount, NEW.currency,
+      jsonb_build_object('order_id',NEW.order_id,'appointment_id',NEW.appointment_id,'payment_reference',NEW.payment_reference,'status','approved'));
+    INSERT INTO channel_notifications (business_id, recipient_channel, recipient_address, template_type, payload)
+    VALUES (NEW.business_id, COALESCE(NULLIF(NEW.channel,''),'manual'), NEW.payer_contact, 'payment_receipt',
+      jsonb_build_object('receipt_number',v_receipt,'amount',NEW.amount,'currency',NEW.currency,'payment_reference',NEW.payment_reference,'customer_name',NEW.payer_name));
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS trg_issue_customer_payment_receipt ON customer_payments;
+CREATE TRIGGER trg_issue_customer_payment_receipt AFTER INSERT OR UPDATE ON customer_payments FOR EACH ROW EXECUTE FUNCTION issue_customer_payment_receipt();
