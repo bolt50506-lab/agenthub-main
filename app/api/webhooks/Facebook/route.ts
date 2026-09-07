@@ -2,10 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { buildLeadConversionDirective } from '@/lib/ai/lead-conversion';
 import { extractMetaAttachmentText, type MetaAttachment } from '@/lib/meta/incoming-media';
+import { generateMetaVoiceUrl } from '@/lib/meta/outgoing-voice';
 import { generateAIResponseWithFallback, type ProviderConfig } from '@/lib/ai/providers';
 
 export const dynamic = 'force-dynamic';
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' };
+type ReplyMode = 'disabled' | 'text_only' | 'voice_only' | 'text_and_voice' | 'random';
+
 export async function OPTIONS() { return new Response(null, { status: 200, headers: CORS }); }
 
 export async function GET(req: NextRequest) {
@@ -20,9 +23,32 @@ export async function GET(req: NextRequest) {
 async function fetchSenderName(psid: string, pageAccessToken: string): Promise<string | null> {
   try { const res = await fetch(`https://graph.facebook.com/v18.0/${psid}?fields=first_name,last_name&access_token=${encodeURIComponent(pageAccessToken)}`); if (!res.ok) return null; const data = await res.json() as { first_name?: string; last_name?: string }; return [data.first_name, data.last_name].filter(Boolean).join(' ').trim() || null; } catch { return null; }
 }
-async function sendMessengerReply(psid: string, pageAccessToken: string, text: string) {
-  const res = await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${encodeURIComponent(pageAccessToken)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ recipient: { id: psid }, message: { text }, messaging_type: 'RESPONSE' }) });
-  if (!res.ok) console.error('[Messenger] Send API error:', res.status, (await res.text()).slice(0, 500)); return res.ok;
+
+function resolveReplyMode(configured: unknown, customerText: string): ReplyMode {
+  const text = String(customerText || '').toLowerCase();
+  const wantsVoice = /\b(voice|audio|voice note|voicenote|speak|bol ke|bolkar|bol kar|awaaz|awaz|voice mein|voice me|audio mein|audio me)\b/.test(text);
+  const wantsText = /\b(text|message|likh|likh dein|likh do|type|written|write|chat mein|chat me|message mein|message me)\b/.test(text);
+  if (wantsVoice && !wantsText) return 'voice_only';
+  if (wantsText && !wantsVoice) return 'text_only';
+  const allowed: ReplyMode[] = ['disabled', 'text_only', 'voice_only', 'text_and_voice', 'random'];
+  const mode = allowed.includes(configured as ReplyMode) ? configured as ReplyMode : 'text_and_voice';
+  if (mode === 'random') return Math.random() < 0.5 ? 'text_only' : 'voice_only';
+  return mode;
+}
+
+async function sendMessengerReply(psid: string, pageAccessToken: string, text: string, mode: ReplyMode, audioUrl?: string | null) {
+  let ok = true;
+  if (mode === 'text_only' || mode === 'disabled' || mode === 'text_and_voice' || (!audioUrl && mode === 'voice_only')) {
+    const res = await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${encodeURIComponent(pageAccessToken)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ recipient: { id: psid }, message: { text }, messaging_type: 'RESPONSE' }) });
+    ok = res.ok && ok;
+    if (!res.ok) console.error('[Messenger] Text send API error:', res.status, (await res.text()).slice(0, 500));
+  }
+  if (audioUrl && (mode === 'voice_only' || mode === 'text_and_voice')) {
+    const res = await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${encodeURIComponent(pageAccessToken)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ recipient: { id: psid }, message: { attachment: { type: 'audio', payload: { url: audioUrl, is_reusable: false } } }, messaging_type: 'RESPONSE' }) });
+    ok = res.ok && ok;
+    if (!res.ok) console.error('[Messenger] Audio send API error:', res.status, (await res.text()).slice(0, 500));
+  }
+  return ok;
 }
 
 export async function POST(req: NextRequest) {
@@ -42,8 +68,7 @@ export async function POST(req: NextRequest) {
         if (!businessId || !pageAccessToken) { console.error('[Messenger] Missing business or page token for page:', pageId); continue; }
         if (messageId) { const { data: duplicate } = await supabase.from('messages').select('id').eq('business_id', businessId).eq('metadata->>messenger_message_id', messageId).limit(1).maybeSingle(); if (duplicate) continue; }
 
-        let inboundText = textBody || '';
-        let mediaKind: 'image' | 'audio' | null = null;
+        let inboundText = textBody || ''; let mediaKind: 'image' | 'audio' | null = null;
         if (!inboundText && attachments.length) {
           for (const attachment of attachments) {
             try { const extracted = await extractMetaAttachmentText(attachment, pageAccessToken, businessId); if (extracted?.text) { inboundText = extracted.text; mediaKind = extracted.kind; break; } } catch (mediaError) { console.error('[Messenger] Attachment analysis failed:', mediaError); }
@@ -83,9 +108,18 @@ export async function POST(req: NextRequest) {
         const aiResponse = await generateAIResponseWithFallback({ messages: [{ role: 'user', content: inboundText }], systemPrompt, temperature: 0.7, maxTokens: agentSettings?.max_response_length ? Math.min(1024, agentSettings.max_response_length) : 1024, businessId }, providerConfigs);
         if (aiResponse.error || !aiResponse.content?.trim()) { console.error('[Messenger] AI generation failed:', aiResponse.error); continue; }
         const finalReply = aiResponse.content.trim();
-        await supabase.from('messages').insert({ business_id: businessId, conversation_id: conversation.id, sender_type: 'agent', sender_id: agent?.id || null, content: finalReply, content_type: 'text', is_inbound: false, metadata: { channel: 'facebook_messenger', provider: aiResponse.provider, model: aiResponse.model } });
+        const replyMode = resolveReplyMode(config.voice_reply_mode, inboundText);
+        let audioUrl: string | null = null;
+        if (replyMode === 'voice_only' || replyMode === 'text_and_voice') {
+          try {
+            const voice = await generateMetaVoiceUrl(businessId, finalReply, agentSettings?.response_language || null);
+            audioUrl = voice?.url || null;
+          } catch (voiceError) { console.error('[Messenger] Audio generation failed; falling back to text:', voiceError); }
+        }
+        const effectiveMode: ReplyMode = (replyMode === 'voice_only' && !audioUrl) ? 'text_only' : replyMode;
+        await supabase.from('messages').insert({ business_id: businessId, conversation_id: conversation.id, sender_type: 'agent', sender_id: agent?.id || null, content: finalReply, content_type: effectiveMode === 'voice_only' ? 'audio' : 'text', is_inbound: false, metadata: { channel: 'facebook_messenger', provider: aiResponse.provider, model: aiResponse.model, reply_mode: effectiveMode, audio_sent: Boolean(audioUrl && (effectiveMode === 'voice_only' || effectiveMode === 'text_and_voice')) } });
         await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversation.id);
-        console.log('[Messenger] Reply sent:', await sendMessengerReply(psid, pageAccessToken, finalReply));
+        console.log('[Messenger] Reply sent:', await sendMessengerReply(psid, pageAccessToken, finalReply, effectiveMode, audioUrl));
       } catch (error) { console.error('[Messenger] Error processing event:', error); }
     }
   }
