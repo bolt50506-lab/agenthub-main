@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { buildLeadConversionDirective } from '@/lib/ai/lead-conversion';
 import { extractMetaAttachmentText, type MetaAttachment } from '@/lib/meta/incoming-media';
+import { generateMetaVoiceUrl } from '@/lib/meta/outgoing-voice';
 import { generateAIResponseWithFallback, type ProviderConfig } from '@/lib/ai/providers';
 
 export const dynamic = 'force-dynamic';
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' };
+type ReplyMode = 'disabled' | 'text_only' | 'voice_only' | 'text_and_voice' | 'random';
 export async function OPTIONS() { return new Response(null, { status: 200, headers: CORS }); }
 
 export async function GET(req: NextRequest) {
@@ -20,9 +22,32 @@ export async function GET(req: NextRequest) {
 async function fetchSenderName(igsid: string, accessToken: string): Promise<string | null> {
   try { const res = await fetch(`https://graph.facebook.com/v18.0/${igsid}?fields=name,username&access_token=${encodeURIComponent(accessToken)}`); if (!res.ok) return null; const data = await res.json() as { name?: string; username?: string }; return data.name || data.username || null; } catch { return null; }
 }
-async function sendInstagramReply(igsid: string, accessToken: string, text: string) {
-  const res = await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${encodeURIComponent(accessToken)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ recipient: { id: igsid }, message: { text } }) });
-  if (!res.ok) console.error('[Instagram] Send API error:', res.status, (await res.text()).slice(0, 500)); return res.ok;
+
+function resolveReplyMode(configured: unknown, customerText: string): ReplyMode {
+  const text = String(customerText || '').toLowerCase();
+  const wantsVoice = /\b(voice|audio|voice note|voicenote|speak|bol ke|bolkar|bol kar|awaaz|awaz|voice mein|voice me|audio mein|audio me)\b/.test(text);
+  const wantsText = /\b(text|message|likh|likh dein|likh do|type|written|write|chat mein|chat me|message mein|message me)\b/.test(text);
+  if (wantsVoice && !wantsText) return 'voice_only';
+  if (wantsText && !wantsVoice) return 'text_only';
+  const allowed: ReplyMode[] = ['disabled', 'text_only', 'voice_only', 'text_and_voice', 'random'];
+  const mode = allowed.includes(configured as ReplyMode) ? configured as ReplyMode : 'text_and_voice';
+  if (mode === 'random') return Math.random() < 0.5 ? 'text_only' : 'voice_only';
+  return mode;
+}
+
+async function sendInstagramReply(igsid: string, accessToken: string, text: string, mode: ReplyMode, audioUrl?: string | null) {
+  let ok = true;
+  if (mode === 'text_only' || mode === 'disabled' || mode === 'text_and_voice' || (!audioUrl && mode === 'voice_only')) {
+    const res = await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${encodeURIComponent(accessToken)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ recipient: { id: igsid }, message: { text } }) });
+    ok = res.ok && ok;
+    if (!res.ok) console.error('[Instagram] Text send API error:', res.status, (await res.text()).slice(0, 500));
+  }
+  if (audioUrl && (mode === 'voice_only' || mode === 'text_and_voice')) {
+    const res = await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${encodeURIComponent(accessToken)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ recipient: { id: igsid }, message: { attachment: { type: 'audio', payload: { url: audioUrl, is_reusable: false } } } }) });
+    ok = res.ok && ok;
+    if (!res.ok) console.error('[Instagram] Audio send API error:', res.status, (await res.text()).slice(0, 500));
+  }
+  return ok;
 }
 
 export async function POST(req: NextRequest) {
@@ -82,9 +107,18 @@ export async function POST(req: NextRequest) {
         const aiResponse = await generateAIResponseWithFallback({ messages: [{ role: 'user', content: inboundText }], systemPrompt, temperature: 0.7, maxTokens: agentSettings?.max_response_length ? Math.min(1024, agentSettings.max_response_length) : 1024, businessId }, providerConfigs);
         if (aiResponse.error || !aiResponse.content?.trim()) { console.error('[Instagram] AI generation failed:', aiResponse.error); continue; }
         const finalReply = aiResponse.content.trim();
-        await supabase.from('messages').insert({ business_id: businessId, conversation_id: conversation.id, sender_type: 'agent', sender_id: agent?.id || null, content: finalReply, content_type: 'text', is_inbound: false, metadata: { channel: 'instagram', provider: aiResponse.provider, model: aiResponse.model } });
+        const replyMode = resolveReplyMode(config.voice_reply_mode, inboundText);
+        let audioUrl: string | null = null;
+        if (replyMode === 'voice_only' || replyMode === 'text_and_voice') {
+          try {
+            const voice = await generateMetaVoiceUrl(businessId, finalReply, agentSettings?.response_language || null);
+            audioUrl = voice?.url || null;
+          } catch (voiceError) { console.error('[Instagram] Audio generation failed; falling back to text:', voiceError); }
+        }
+        const effectiveMode: ReplyMode = (replyMode === 'voice_only' && !audioUrl) ? 'text_only' : replyMode;
+        await supabase.from('messages').insert({ business_id: businessId, conversation_id: conversation.id, sender_type: 'agent', sender_id: agent?.id || null, content: finalReply, content_type: effectiveMode === 'voice_only' ? 'audio' : 'text', is_inbound: false, metadata: { channel: 'instagram', provider: aiResponse.provider, model: aiResponse.model, reply_mode: effectiveMode, audio_sent: Boolean(audioUrl && (effectiveMode === 'voice_only' || effectiveMode === 'text_and_voice')) } });
         await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversation.id);
-        console.log('[Instagram] Reply sent:', await sendInstagramReply(igsid, accessToken, finalReply));
+        console.log('[Instagram] Reply sent:', await sendInstagramReply(igsid, accessToken, finalReply, effectiveMode, audioUrl));
       } catch (error) { console.error('[Instagram] Error processing event:', error); }
     }
   }
