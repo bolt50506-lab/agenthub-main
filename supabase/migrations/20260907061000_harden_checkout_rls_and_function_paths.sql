@@ -4,9 +4,13 @@ drop policy if exists "public checkout orders are publicly readable" on public.p
 drop policy if exists "public checkout orders are publicly writable" on public.public_checkout_orders;
 
 revoke execute on function public.agenthub_expire_human_takeovers() from anon;
+revoke execute on function public.agenthub_expire_human_takeovers() from public;
 revoke execute on function public.enforce_ai_usage_limit_trigger() from anon;
+revoke execute on function public.enforce_ai_usage_limit_trigger() from public;
 revoke execute on function public.enforce_plan_limit_trigger() from anon;
+revoke execute on function public.enforce_plan_limit_trigger() from public;
 revoke execute on function public.sync_payment_verification_from_order() from anon;
+revoke execute on function public.sync_payment_verification_from_order() from public;
 
 alter function public.agenthub_auto_resume_ai_on_customer_message() set search_path = public;
 alter function public.agenthub_set_ai_resume_deadline() set search_path = public;
