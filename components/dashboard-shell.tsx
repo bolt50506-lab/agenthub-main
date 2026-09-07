@@ -21,7 +21,7 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet';
 import {
-  LayoutDashboard, Bot, MessageSquare, Users, Calendar, CheckSquare,
+  LayoutDashboard, Bot, MessageSquare, Users, Calendar, CheckSquare, ShoppingCart, CreditCard, BriefcaseBusiness, ReceiptText,
   BookOpen, Package, Image, Plug, UserCog, BarChart3, Settings, Zap,
   Menu, LogOut, ChevronDown, Building, Shield, Moon, Sun, Bell, AlertCircle, Mic2, Activity,
 } from 'lucide-react';
@@ -35,6 +35,10 @@ const NAV_ITEMS = [
   { href: '/dashboard/conversations', label: 'Conversations', icon: MessageSquare },
   { href: '/dashboard/leads', label: 'Leads', icon: Users },
   { href: '/dashboard/appointments', label: 'Appointments', icon: Calendar },
+  { href: '/dashboard/services', label: 'Services', icon: BriefcaseBusiness },
+  { href: '/dashboard/orders', label: 'Orders & Bookings', icon: ShoppingCart },
+  { href: '/dashboard/payments', label: 'Customer Payments', icon: CreditCard },
+  { href: '/dashboard/billing', label: 'My Billing & Receipts', icon: ReceiptText },
   { href: '/dashboard/follow-ups', label: 'Follow-ups', icon: CheckSquare },
   { href: '/dashboard/follow-up-automation', label: 'Follow-up Automation', icon: Zap },
   { href: '/dashboard/knowledge', label: 'Knowledge Base', icon: BookOpen },
