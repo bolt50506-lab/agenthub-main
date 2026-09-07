@@ -22,7 +22,7 @@ async function requireBusinessManager(req: NextRequest, businessId: string) {
   ]);
   const allowed = profile?.is_super_admin === true || (membership?.status === 'active' && ['owner','admin'].includes(membership.role));
   if (!allowed) return { error: 'You do not have permission to manage voices for this business', status: 403 as const };
-  return { supabase, userId: userData.user.id, token };
+  return { supabase, userId: userData.user.id };
 }
 
 async function serviceRequest(baseUrl: string, path: string, init?: RequestInit) {
@@ -31,7 +31,14 @@ async function serviceRequest(baseUrl: string, path: string, init?: RequestInit)
   finally { clearTimeout(timer); }
 }
 
+async function cleanupProviderProfile(baseUrl: string, providerVoiceId: string) {
+  await serviceRequest(baseUrl, `/profiles/${encodeURIComponent(providerVoiceId)}`, { method: 'DELETE' }).catch(() => null);
+}
+
 export async function POST(req: NextRequest) {
+  let baseUrl = OMNIVOICE_DEFAULT_URL;
+  let providerVoiceId: string | null = null;
+  let createdDbVoiceId: string | null = null;
   try {
     const form = await req.formData();
     const businessId = String(form.get('businessId') || '').trim();
@@ -58,47 +65,56 @@ export async function POST(req: NextRequest) {
     if (limitError) return NextResponse.json({ error: limitError.message }, { status: 500 });
     if (!limit?.allowed) return NextResponse.json({ error: 'Voice clone limit reached for your subscription plan', limit }, { status: 403 });
 
-    const baseUrl = (process.env.OMNIVOICE_SERVICE_URL || OMNIVOICE_DEFAULT_URL).replace(/\/$/, '');
+    baseUrl = (process.env.OMNIVOICE_SERVICE_URL || OMNIVOICE_DEFAULT_URL).replace(/\/$/, '');
     const profileResponse = await serviceRequest(baseUrl, '/profiles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, description: description || null, language }) }).catch(() => null);
     if (!profileResponse) return NextResponse.json({ error: 'OmniVoice service is unreachable' }, { status: 503 });
     const profileRaw = await profileResponse.text(); let profileData: Record<string, unknown> = {};
     try { profileData = profileRaw ? JSON.parse(profileRaw) : {}; } catch { profileData = { raw: profileRaw }; }
     if (!profileResponse.ok || typeof profileData.id !== 'string') return NextResponse.json({ error: typeof profileData.error === 'string' ? profileData.error : 'OmniVoice rejected profile creation' }, { status: 502 });
+    providerVoiceId = profileData.id;
 
-    const providerVoiceId = profileData.id; const sample = files[0];
     try {
-      const sampleForm = new FormData(); sampleForm.append('file', sample, sample.name || 'voice-sample'); if (referenceText) sampleForm.append('reference_text', referenceText);
+      const sampleForm = new FormData(); sampleForm.append('file', files[0], files[0].name || 'voice-sample'); if (referenceText) sampleForm.append('reference_text', referenceText);
       const sampleResponse = await serviceRequest(baseUrl, `/profiles/${encodeURIComponent(providerVoiceId)}/samples`, { method: 'POST', body: sampleForm });
       if (!sampleResponse.ok) throw new Error((await sampleResponse.text()).slice(0, 1000) || 'OmniVoice rejected the reference audio');
     } catch (error) {
-      await serviceRequest(baseUrl, `/profiles/${encodeURIComponent(providerVoiceId)}`, { method: 'DELETE' }).catch(() => null);
+      await cleanupProviderProfile(baseUrl, providerVoiceId);
+      providerVoiceId = null;
       return NextResponse.json({ error: error instanceof Error ? error.message : 'OmniVoice rejected the reference audio' }, { status: 502 });
     }
 
-    // The production schema enforces one active default voice per business across
-    // ALL providers. The old Voicebox profile may still be marked default, so only
-    // clearing OmniVoice defaults is insufficient and causes a duplicate-key error.
-    // Clear every active default before creating the new OmniVoice default.
-    const { error: clearDefaultsError } = await supabase
-      .from('voice_profiles')
+    // The production schema has a partial unique index enforcing one active default
+    // voice per business across every provider. Legacy Voicebox profiles can still be
+    // default, so clear ALL active defaults before inserting the OmniVoice profile.
+    const { error: clearDefaultsError } = await supabase.from('voice_profiles')
       .update({ is_default: false })
       .eq('business_id', businessId)
       .eq('status', 'active')
       .eq('is_default', true);
     if (clearDefaultsError) {
-      await serviceRequest(baseUrl, `/profiles/${encodeURIComponent(providerVoiceId)}`, { method: 'DELETE' }).catch(() => null);
+      await cleanupProviderProfile(baseUrl, providerVoiceId);
+      providerVoiceId = null;
       return NextResponse.json({ error: `Unable to prepare default voice slot: ${clearDefaultsError.message}` }, { status: 500 });
     }
 
-    // clone_type is constrained by the existing application schema to
-    // "instant" and "professional"; OmniVoice reference-audio cloning maps to
-    // the existing "instant" application type.
     const payload = {
-      business_id: businessId, name, description: description || null, provider: 'omnivoice', provider_voice_id: providerVoiceId,
-      clone_type: 'instant', status: 'active', requires_verification: false, is_default: false, preview_url: null,
-      language, consent_confirmed_at: new Date().toISOString(), created_by: userId
+      business_id: businessId,
+      name,
+      description: description || null,
+      provider: 'omnivoice',
+      provider_voice_id: providerVoiceId,
+      clone_type: 'instant',
+      status: 'active',
+      requires_verification: false,
+      is_default: false,
+      preview_url: null,
+      language,
+      consent_confirmed_at: new Date().toISOString(),
+      created_by: userId,
     };
 
+    // Insert as non-default first. This avoids the business-wide default unique index
+    // during the row creation and lets the subsequent UPDATE establish the default.
     let voiceProfile: any = null;
     let insertError: any = null;
     const firstInsert = await supabase.from('voice_profiles').insert(payload).select('id, business_id, name, description, provider, provider_voice_id, clone_type, status, requires_verification, is_default, preview_url, language, created_at').single();
@@ -113,30 +129,28 @@ export async function POST(req: NextRequest) {
     }
 
     if (insertError) {
-      await serviceRequest(baseUrl, `/profiles/${encodeURIComponent(providerVoiceId)}`, { method: 'DELETE' }).catch(() => null);
-      return NextResponse.json({ error: insertError.message }, { status: /limit reached/i.test(insertError.message) ? 403 : 500 });
+      await cleanupProviderProfile(baseUrl, providerVoiceId);
+      providerVoiceId = null;
+      return NextResponse.json({ error: insertError.message }, { status: /duplicate key|unique constraint/i.test(insertError.message || '') ? 409 : (/limit reached/i.test(insertError.message) ? 403 : 500) });
     }
+    createdDbVoiceId = voiceProfile.id;
 
-    // Make the newly inserted profile the single active default. Because the row
-    // was inserted non-default, the database's partial unique index cannot reject
-    // the insert merely because a legacy provider had previously been default.
-    const { data: defaultedProfile, error: defaultError } = await supabase
-      .from('voice_profiles')
+    const { data: defaultedProfile, error: defaultError } = await supabase.from('voice_profiles')
       .update({ is_default: true })
       .eq('id', voiceProfile.id)
       .select('id, business_id, name, description, provider, provider_voice_id, clone_type, status, requires_verification, is_default, preview_url, language, created_at')
       .single();
     if (defaultError) {
-      await supabase.from('voice_profiles').delete().eq('id', voiceProfile.id).catch(() => null);
-      await serviceRequest(baseUrl, `/profiles/${encodeURIComponent(providerVoiceId)}`, { method: 'DELETE' }).catch(() => null);
+      await supabase.from('voice_profiles').delete().eq('id', voiceProfile.id);
+      await cleanupProviderProfile(baseUrl, providerVoiceId);
+      providerVoiceId = null;
       return NextResponse.json({ error: defaultError.message }, { status: /duplicate key|unique constraint/i.test(defaultError.message || '') ? 409 : 500 });
     }
 
-    // voice_clone_agreements is not present in the current production schema, so
-    // do not perform a best-effort write to a nonexistent table. Consent is already
-    // recorded on voice_profiles.consent_confirmed_at.
     return NextResponse.json({ success: true, voice: defaultedProfile }, { status: 201 });
   } catch (error) {
+    if (createdDbVoiceId) await createServiceClient().from('voice_profiles').delete().eq('id', createdDbVoiceId);
+    if (providerVoiceId) await cleanupProviderProfile(baseUrl, providerVoiceId);
     console.error('[OmniVoice] Clone failed:', error);
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to create OmniVoice clone' }, { status: 500 });
   }
