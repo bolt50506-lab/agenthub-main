@@ -240,20 +240,14 @@ export async function POST(req: NextRequest) {
     customer.metadata = customerMemory;
     // Keep the CRM pipeline live even when the AI is still formulating its reply.
     if (lead) {
-      const nextStatus = intent.conversion ? 'won'
-        : intent.buying ? 'qualified'
+      const nextStatus = intent.buying || intent.conversion ? 'qualified'
         : intent.hesitation ? 'contacted'
         : lead.status || 'new';
       if (nextStatus !== lead.status) {
         const updates: Record<string, unknown> = { status: nextStatus };
         if (intent.buying && nextStatus !== 'won') updates.interested_product = lead.interested_product || null;
-        if (nextStatus === 'won') {
-          updates.converted_at = new Date().toISOString();
-          updates.conversion_notes = 'Automatically marked from high-intent customer message; review conversion amount in dashboard.';
-        }
         await supabase.from('leads').update(updates).eq('id', lead.id);
         lead.status = nextStatus;
-        if (nextStatus === 'won') await createBusinessNotifications(supabase, businessId, 'conversion', 'Lead converted', (lead.name || customer.name || 'A customer') + ' reached a conversion-ready stage.', { lead_id: lead.id, conversation_id: conversation.id });
       }
     }
     if (intent.human || intent.complaint) {
