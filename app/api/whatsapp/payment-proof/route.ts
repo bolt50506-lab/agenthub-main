@@ -73,6 +73,47 @@ export async function POST(req: NextRequest) {
     const { error: uploadError } = await supabase.storage.from('payment-proofs').upload(path, bytes, { contentType: mimeType, upsert: false });
     if (uploadError) throw new Error(uploadError.message);
 
+    // If this is not an AgentHub subscription checkout proof, treat it as a
+    // payment from the connected business's own customer. This keeps SaaS
+    // subscription approvals completely separate from a store/service sale.
+    if (!order) {
+      const { data: recentOrders } = await supabase.from('orders')
+        .select('id,customer_name,customer_phone,currency,balance_due,status')
+        .eq('business_id', session.business_id)
+        .in('status', ['inquiry','quotation_sent','awaiting_payment','confirmed','processing'])
+        .order('created_at', { ascending: false })
+        .limit(50);
+      const customerOrder = (recentOrders || []).find((candidate: any) =>
+        normalizePhone(candidate.customer_phone) === phone
+      );
+
+      if (customerOrder) {
+        const { data: customerPayment, error: customerPaymentError } = await supabase.from('customer_payments').insert({
+          business_id: session.business_id,
+          order_id: customerOrder.id,
+          channel: 'whatsapp',
+          payer_name: pushName || customerOrder.customer_name || null,
+          payer_contact: phone,
+          amount: Number(customerOrder.balance_due || 0),
+          currency: customerOrder.currency || 'PKR',
+          payment_method: 'manual_transfer',
+          payment_reference: null,
+          proof_path: path,
+          status: 'pending_review',
+          metadata: { whatsapp_message_id: messageId, session_id: sessionId, caption },
+        }).select('id,status').single();
+        if (customerPaymentError || !customerPayment) throw new Error(customerPaymentError?.message || 'Unable to record customer payment');
+        return NextResponse.json({
+          ok: true,
+          type: 'customer_payment',
+          status: 'pending_review',
+          payment_id: customerPayment.id,
+          order_id: customerOrder.id,
+          message: 'Customer payment screenshot received and sent to the business for approval.',
+        });
+      }
+    }
+
     const verificationBusinessId = order?.business_id || null;
     const { data: verification, error } = await supabase.from('payment_verifications').insert({
       business_id: verificationBusinessId,
