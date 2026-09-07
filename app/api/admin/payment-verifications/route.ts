@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { activateCheckoutOrder } from '@/lib/payments/activate-checkout-order';
+import { deliverPendingNotifications } from '@/lib/notifications/deliver';
 
 export const runtime = 'nodejs';
 
@@ -111,6 +112,7 @@ export async function POST(req: NextRequest) {
       rejection_reason: null,
     }).eq('id', id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    await deliverPendingNotifications(supabase, 10).catch(() => null);
     return NextResponse.json({ ok: true, status: 'approved', businessId: result.businessId });
   } catch (error) {
     await supabase.from('public_checkout_orders').update({ status: 'pending_review', rejection_reason: error instanceof Error ? error.message : 'Activation failed.' }).eq('id', order.id);
