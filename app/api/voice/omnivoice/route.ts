@@ -8,7 +8,6 @@ const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 const ALLOWED_AUDIO_TYPES = new Set(['audio/mpeg','audio/mp3','audio/wav','audio/x-wav','audio/ogg','audio/webm','audio/mp4','audio/m4a']);
 const OMNIVOICE_DEFAULT_URL = 'https://agenthub-omnivoice-production.up.railway.app';
 const LANGUAGE_ALIASES: Record<string, string> = { english:'en', en:'en', 'english (us)':'en', 'english (uk)':'en', urdu:'ur', 'roman urdu':'ur', romanurdu:'ur', ur:'ur', hindi:'hi', hi:'hi', arabic:'ar', ar:'ar', punjabi:'pa', pa:'pa', spanish:'es', es:'es', french:'fr', fr:'fr', german:'de', de:'de', italian:'it', it:'it', portuguese:'pt', pt:'pt', chinese:'zh', zh:'zh', japanese:'ja', ja:'ja', korean:'ko', ko:'ko' };
-
 function normalizeLanguage(value: string | null) { const raw = (value || '').trim().toLowerCase(); return LANGUAGE_ALIASES[raw] || raw || 'en'; }
 
 async function requireBusinessManager(req: NextRequest, businessId: string) {
@@ -76,9 +75,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: error instanceof Error ? error.message : 'OmniVoice rejected the reference audio' }, { status: 502 });
     }
 
-    const { data: existingVoices } = await supabase.from('voice_profiles').select('id').eq('business_id', businessId).neq('status', 'failed').limit(1);
-    const { data: voiceProfile, error: insertError } = await supabase.from('voice_profiles').insert({ business_id: businessId, name, description: description || null, provider: 'omnivoice', provider_voice_id: providerVoiceId, clone_type: 'zero-shot', status: 'active', requires_verification: false, is_default: !existingVoices?.length, preview_url: null, language, consent_confirmed_at: new Date().toISOString(), created_by: userId }).select('id, business_id, name, description, provider, clone_type, status, requires_verification, is_default, preview_url, language, created_at').single();
-    if (insertError) { await serviceRequest(baseUrl, `/profiles/${encodeURIComponent(providerVoiceId)}`, { method: 'DELETE' }).catch(() => null); return NextResponse.json({ error: insertError.message }, { status: /limit reached/i.test(insertError.message) ? 403 : 500 }); }
+    // OmniVoice is the only provider represented in Voice Studio. Make the new
+    // clone the default among OmniVoice profiles so an older Voicebox default
+    // can never hijack WhatsApp voice synthesis.
+    await supabase.from('voice_profiles').update({ is_default: false }).eq('business_id', businessId).eq('provider', 'omnivoice').eq('is_default', true);
+    const { data: voiceProfile, error: insertError } = await supabase.from('voice_profiles').insert({
+      business_id: businessId, name, description: description || null, provider: 'omnivoice', provider_voice_id: providerVoiceId,
+      clone_type: 'zero-shot', status: 'active', requires_verification: false, is_default: true, preview_url: null,
+      language, consent_confirmed_at: new Date().toISOString(), created_by: userId
+    }).select('id, business_id, name, description, provider, clone_type, status, requires_verification, is_default, preview_url, language, created_at').single();
+    if (insertError) {
+      await serviceRequest(baseUrl, `/profiles/${encodeURIComponent(providerVoiceId)}`, { method: 'DELETE' }).catch(() => null);
+      return NextResponse.json({ error: insertError.message }, { status: /limit reached/i.test(insertError.message) ? 403 : 500 });
+    }
 
     const agreement = await supabase.from('voice_clone_agreements').insert({ business_id: businessId, voice_profile_id: voiceProfile.id, accepted_by: userId, business_name: business.name, voice_name: name, provider: 'omnivoice', agreement_version: 'voice-cloning-consent-v1', agreement_text: 'VOICE CLONING CONSENT AND AUTHORIZATION\n\nI confirm that I am either the owner of the voice being submitted or have explicit authorization from the voice owner to create and use this voice clone for the named business.\n\nI understand that voice cloning must not be used for fraud, impersonation, scams, deception, unlawful activity, or any harmful purpose.' });
     if (agreement.error) console.error('[OmniVoice] Failed to save cloning agreement:', agreement.error);
