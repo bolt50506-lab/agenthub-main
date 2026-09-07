@@ -137,6 +137,7 @@ export async function POST(req: NextRequest) {
       agentSettings = settings;
     }
     const { data: products } = await supabase.from('products').select('id, business_id, category_id, name, description, price, currency, availability, status').eq('business_id', businessId).eq('status', 'active').limit(100);
+    const { data: services } = await supabase.from('services').select('id,name,description,price,currency,duration_minutes,advance_required,status').eq('business_id', businessId).eq('status','active').limit(100);
     const { data: knowledgeItems } = await supabase.from('knowledge_items').select('id, business_id, title, category, content, tags, metadata, status').eq('business_id', businessId).eq('status', 'active').limit(50);
     const { data: subscriptionPlans } = await supabase.from('subscription_plans').select('name, description, price_cents, yearly_price_cents, currency, billing_period, features, is_active, sort_order').eq('is_active', true).order('sort_order', { ascending: true });
 
@@ -228,6 +229,7 @@ export async function POST(req: NextRequest) {
     const providerConfigs: ProviderConfig[] = providerRows.map((row) => ({ provider: row.provider, apiKey: row.api_key_encrypted || undefined, apiUrl: row.base_url || undefined, model: row.model, temperature: 0.7, maxTokens: 1024 }));
 
     const knowledgeContext = knowledgeItems?.length ? knowledgeItems.map((item) => `Title: ${item.title}\nCategory: ${item.category}\nContent: ${item.content}\nTags: ${(item.tags || []).join(', ')}`).join('\n\n---\n\n') : 'No additional business knowledge has been added yet.';
+    const servicesContext = services?.length ? services.map((service) => `Service: ${service.name}\nDescription: ${service.description || 'No description provided'}\nExact Price: ${service.price != null ? `${service.price} ${service.currency || ''}` : 'Not provided'}\nAdvance Required: ${service.advance_required != null ? `${service.advance_required} ${service.currency || ''}` : '0'}`).join('\n\n') : 'No services have been added yet.';
     const productsContext = products?.length ? products.map((product) => `Product: ${product.name}\nDescription: ${product.description || 'No description provided'}\nExact Price: ${product.price != null ? `${product.price} ${product.currency || ''}` : 'Not provided'}\nAvailability: ${product.availability || 'Not provided'}`).join('\n\n') : 'No products have been added yet.';
     const subscriptionPlansContext = subscriptionPlans?.length ? subscriptionPlans.map((plan) => { const currentPrice = typeof plan.price_cents === 'number' ? `${(plan.price_cents / 100).toFixed(2)} ${plan.currency || ''}` : 'Not provided'; const yearlyPrice = typeof plan.yearly_price_cents === 'number' ? `${(plan.yearly_price_cents / 100).toFixed(2)} ${plan.currency || ''}` : 'Not provided'; const features = Array.isArray(plan.features) && plan.features.length ? plan.features.join(', ') : 'No feature list provided'; return `Plan: ${plan.name}\nDescription: ${plan.description || 'Not provided'}\nExact ${plan.billing_period || 'monthly'} Price: ${currentPrice}\nExact Yearly Price: ${yearlyPrice}\nFeatures: ${features}`; }).join('\n\n---\n\n') : 'No subscription plans are available.';
 
@@ -273,7 +275,7 @@ export async function POST(req: NextRequest) {
     const customerLanguage = detectReplyLanguage(message);
     const languageInstruction = buildLanguageInstruction(message);
     console.log('[WhatsApp API] Detected customer language:', customerLanguage);
-    const systemPrompt = `You are the official WhatsApp assistant for ${business.name}.\n\nYou represent THIS business only.\n\nBUSINESS INFORMATION:\nBusiness Name: ${business.name}\nIndustry: ${business.industry || 'Not specified'}\nBusiness Description: ${business.description || 'Not specified'}\nWebsite: ${business.website || 'Not provided'}\nBusiness Phone: ${business.phone || 'Not provided'}\nBusiness Address: ${business.address || 'Not provided'}\n\nAGENT INFORMATION:\nAgent Name: ${agent?.name || `${business.name} Assistant`}\nAgent Purpose: ${agent?.purpose || 'Help customers and answer business questions'}\nAgent Description: ${agent?.description || 'Not provided'}\nCommunication Style: ${agent?.communication_style || 'Professional'}\nPrimary Goal: ${agent?.primary_goal || 'Help customers effectively'}\n\nAGENT SETTINGS:\nTone: ${agentSettings?.tone || 'professional'}\nResponse Language Setting: ${agentSettings?.response_language || 'English'}\nGreeting Behavior: ${agentSettings?.greeting_behavior || 'Natural'}\nCustom Instructions: ${agentSettings?.custom_instructions || 'None'}\n\nBUSINESS PRODUCTS:\n${productsContext}\n\nBUSINESS KNOWLEDGE:\n${knowledgeContext}\n\nLIVE SUBSCRIPTION PLANS AND PRICING:\n${subscriptionPlansContext}\n\nLANGUAGE OVERRIDE FOR THIS MESSAGE — HIGHEST PRIORITY:\n${languageInstruction}\nDetected customer language: ${customerLanguage}\nThe customer's current language overrides the dashboard/default response language. If the customer uses Roman Urdu, every normal customer-facing sentence must use Latin/English letters; do not answer in Urdu Arabic script. If the customer uses English, answer in English. If the customer uses Urdu script, answer in Urdu script. If mixed, naturally preserve the mix. Do not translate the customer's Roman Urdu into English-only.\n\nIMPORTANT RULES:\n- Represent ${business.name}, not AgentHub AI.\n- Never introduce yourself as AgentHub AI.\n- Never mention internal systems, APIs, AI providers, Gemini, Groq, Ollama, or databases.\n- Only use products, knowledge, prices and policies belonging to ${business.name}.\n- Never invent missing information or prices.\n- If an exact price is available, state it directly.\n- Be helpful, professional and natural.\n- Keep replies suitable for WhatsApp and avoid unnecessary long explanations.\n- Match the customer's language and conversational style.\n- Never claim an action was completed unless it actually happened.\n- Do not restart an existing conversation with a generic greeting.\n\nConversation behavior:\n- Match the customer's energy and pace.\n- Never repeat information already given unless asked.\n- SALES INTELLIGENCE: For genuine prospects, actively but respectfully explain relevant benefits, ROI and solutions. Do not give up after a mild objection; address the objection once with useful value, then respect a clear refusal.
+    const systemPrompt = `You are the official WhatsApp assistant for ${business.name}.\n\nYou represent THIS business only.\n\nBUSINESS INFORMATION:\nBusiness Name: ${business.name}\nIndustry: ${business.industry || 'Not specified'}\nBusiness Description: ${business.description || 'Not specified'}\nWebsite: ${business.website || 'Not provided'}\nBusiness Phone: ${business.phone || 'Not provided'}\nBusiness Address: ${business.address || 'Not provided'}\n\nAGENT INFORMATION:\nAgent Name: ${agent?.name || `${business.name} Assistant`}\nAgent Purpose: ${agent?.purpose || 'Help customers and answer business questions'}\nAgent Description: ${agent?.description || 'Not provided'}\nCommunication Style: ${agent?.communication_style || 'Professional'}\nPrimary Goal: ${agent?.primary_goal || 'Help customers effectively'}\n\nAGENT SETTINGS:\nTone: ${agentSettings?.tone || 'professional'}\nResponse Language Setting: ${agentSettings?.response_language || 'English'}\nGreeting Behavior: ${agentSettings?.greeting_behavior || 'Natural'}\nCustom Instructions: ${agentSettings?.custom_instructions || 'None'}\n\nBUSINESS PRODUCTS:\n${productsContext}\n\nBUSINESS SERVICES:\n${servicesContext}\n\nBUSINESS KNOWLEDGE:\n${knowledgeContext}\n\nLIVE SUBSCRIPTION PLANS AND PRICING:\n${subscriptionPlansContext}\n\nLANGUAGE OVERRIDE FOR THIS MESSAGE — HIGHEST PRIORITY:\n${languageInstruction}\nDetected customer language: ${customerLanguage}\nThe customer's current language overrides the dashboard/default response language. If the customer uses Roman Urdu, every normal customer-facing sentence must use Latin/English letters; do not answer in Urdu Arabic script. If the customer uses English, answer in English. If the customer uses Urdu script, answer in Urdu script. If mixed, naturally preserve the mix. Do not translate the customer's Roman Urdu into English-only.\n\nIMPORTANT RULES:\n- Represent ${business.name}, not AgentHub AI.\n- Never introduce yourself as AgentHub AI.\n- Never mention internal systems, APIs, AI providers, Gemini, Groq, Ollama, or databases.\n- Only use products, knowledge, prices and policies belonging to ${business.name}.\n- Never invent missing information or prices.\n- If an exact price is available, state it directly.\n- Be helpful, professional and natural.\n- Keep replies suitable for WhatsApp and avoid unnecessary long explanations.\n- Match the customer's language and conversational style.\n- Never claim an action was completed unless it actually happened.\n- When a customer clearly asks about or selects a listed product/service, the CRM may record an inquiry draft containing the exact item and price. Do not tell the customer an order is confirmed unless they explicitly confirm it.\n- For appointments, confirm the exact service, date and time before saying the booking is completed.\n- Do not restart an existing conversation with a generic greeting.\n\nConversation behavior:\n- Match the customer's energy and pace.\n- Never repeat information already given unless asked.\n- SALES INTELLIGENCE: For genuine prospects, actively but respectfully explain relevant benefits, ROI and solutions. Do not give up after a mild objection; address the objection once with useful value, then respect a clear refusal.
 - If the customer expresses a price/budget objection, explain the most relevant benefit or alternative based only on available business information.
 - LEAD CAPTURE: When useful, naturally ask for missing contact or requirement details. Do not repeatedly ask for information already known.
 - FOLLOW-UP: If the customer explicitly says they will decide later or names a future time, keep the conversation open and allow follow-up automation to re-engage them.
@@ -384,11 +386,46 @@ export async function POST(req: NextRequest) {
     if (aiMessageError) console.error('[WhatsApp API] AI message save error:', aiMessageError);
     await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversation.id);
 
+    // Record the exact product/service the customer is asking about as a CRM
+    // inquiry. This does not mark it paid or delivered; it gives the business
+    // a measurable product/service interest record tied to the conversation.
+    if (intent.buying && (products?.length || services?.length)) {
+      const normalizedMessage = message.toLowerCase();
+      const productMatch = (products || []).find((item: any) => normalizedMessage.includes(String(item.name || '').toLowerCase()));
+      const serviceMatch = !productMatch ? (services || []).find((item: any) => normalizedMessage.includes(String(item.name || '').toLowerCase())) : null;
+      const item: any = productMatch || serviceMatch;
+      if (item) {
+        const { data: existingOrder } = await supabase.from('orders').select('id')
+          .eq('business_id', businessId).eq('conversation_id', conversation.id)
+          .in('status',['inquiry','quotation_sent','awaiting_payment']).order('created_at',{ascending:false}).limit(1).maybeSingle();
+        let orderId = existingOrder?.id || null;
+        if (!orderId) {
+          const total = Number(item.price || 0);
+          const orderNumber = 'AI-' + Date.now().toString().slice(-10);
+          const { data: createdOrder } = await supabase.from('orders').insert({
+            business_id: businessId, customer_id: customer.id, lead_id: lead?.id || null, conversation_id: conversation.id,
+            order_number: orderNumber, customer_name: customer.name || phone || pushName || 'Customer', customer_phone: phone || null,
+            channel: 'whatsapp', status: intent.conversion ? 'confirmed' : 'inquiry', currency: item.currency || 'PKR',
+            subtotal: total, total_amount: total, balance_due: total, payment_status: 'unpaid',
+            metadata: { auto_recorded: true, source_message_id: whatsappMessageId, item_type: productMatch ? 'product' : 'service' },
+          }).select('id').single();
+          orderId = createdOrder?.id || null;
+          if (orderId) await supabase.from('order_items').insert({
+            order_id: orderId, product_id: productMatch ? item.id : null, service_id: serviceMatch ? item.id : null,
+            item_name: item.name, item_type: productMatch ? 'product' : 'service', quantity: 1,
+            unit_price: Number(item.price || 0), total_price: Number(item.price || 0),
+          });
+        }
+      }
+    }
+
     let bookedAppointmentId: string | null = null;
     if (agentSettings?.appointments_enabled === true) {
       const detected = await detectAppointmentRequest(message, finalReply, business.address || '', providerConfigs);
       if (detected) {
-        const { data: newAppointment } = await supabase.from('appointments').insert({ business_id: businessId, customer_id: customer.id, lead_id: lead?.id || null, customer_name: customer.name || phone || 'WhatsApp Customer', date: detected.date, start_time: detected.startTime, end_time: detected.endTime, status: 'scheduled', notes: detected.notes }).select().single();
+        const normalized = (message + ' ' + finalReply).toLowerCase();
+        const serviceMatch = (services || []).find((service: any) => normalized.includes(String(service.name || '').toLowerCase()));
+        const { data: newAppointment } = await supabase.from('appointments').insert({ business_id: businessId, customer_id: customer.id, lead_id: lead?.id || null, customer_name: customer.name || phone || 'WhatsApp Customer', service_id: serviceMatch?.id || null, service_name: serviceMatch?.name || null, service_price: serviceMatch?.price != null ? Number(serviceMatch.price) : null, currency: serviceMatch?.currency || 'PKR', advance_required: Number(serviceMatch?.advance_required || 0), date: detected.date, start_time: detected.startTime, end_time: detected.endTime, status: 'scheduled', notes: detected.notes }).select().single();
         if (newAppointment) {
           bookedAppointmentId = newAppointment.id;
           if (lead) await supabase.from('leads').update({ status: 'appointment_booked' }).eq('id', lead.id);
