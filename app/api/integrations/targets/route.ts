@@ -46,9 +46,7 @@ async function discoverMetaTargets(channel: 'facebook_messenger' | 'instagram', 
       }
       const pageTargets = pages.filter((page: any) => page?.id && page?.access_token).map((page: any) => ({
         id: String(channel === 'instagram' ? page.instagram_business_account?.id || page.id : page.id),
-        page_id: String(page.id),
-        name: String(page.name || page.id),
-        access_token: String(page.access_token),
+        page_id: String(page.id), name: String(page.name || page.id), access_token: String(page.access_token),
         instagram_account_id: page.instagram_business_account?.id ? String(page.instagram_business_account.id) : null,
       }));
       if (pageTargets.length) config.page_targets = pageTargets;
@@ -80,7 +78,9 @@ export async function GET(req: NextRequest) {
       const data = await response.json().catch(() => null);
       if (!response.ok) return NextResponse.json({ connected: session.status === 'connected', targets: [], target_mode: 'all', selected_ids: [], error: data?.message || 'Unable to load WhatsApp groups' }, { status: 502 });
       const { data: rule } = await service.from('group_rules').select('group_target_mode, selected_group_ids').eq('business_id', businessId).maybeSingle();
-      return NextResponse.json({ connected: true, targets: (data?.groups || []).map((g: any) => ({ id: String(g.id), name: String(g.name || g.id), type: 'group' })), target_mode: rule?.group_target_mode || 'all', selected_ids: Array.isArray(rule?.selected_group_ids) ? rule.selected_group_ids : [] });
+      const groupTargetMode = rule?.group_target_mode || 'all';
+      const selectedGroupIds = Array.isArray(rule?.selected_group_ids) ? rule.selected_group_ids : [];
+      return NextResponse.json({ connected: true, targets: (data?.groups || []).map((g: any) => ({ id: String(g.id), name: String(g.name || g.id), type: 'group' })), target_mode: groupTargetMode, selected_ids: selectedGroupIds });
     } catch (error) {
       return NextResponse.json({ connected: session.status === 'connected', targets: [], target_mode: 'all', selected_ids: [], error: error instanceof Error ? error.message : 'Unable to load WhatsApp groups' }, { status: 502 });
     }
@@ -88,19 +88,12 @@ export async function GET(req: NextRequest) {
 
   const { data: integrations } = await service.from('integrations').select('id, config, status').eq('business_id', businessId).eq('type', channel).eq('status', 'connected');
   if (!integrations?.length) return NextResponse.json({ connected: false, targets: [], target_mode: 'all', selected_ids: [] });
-
   const base = integrations[0];
   const config = { ...((base.config || {}) as IntegrationConfig) };
   const targets = await discoverMetaTargets(channel, config);
   if (config.page_targets && JSON.stringify(config.page_targets) !== JSON.stringify((base.config || {}).page_targets || null)) await service.from('integrations').update({ config }).eq('id', base.id);
-
-  const selectedIds = [...new Set(integrations.flatMap((row: any) => {
-    const rowConfig = row.config || {};
-    const id = channel === 'facebook_messenger' ? rowConfig.page_id : rowConfig.instagram_account_id;
-    return id ? [String(id)] : [];
-  }))];
-  const mode = config.target_mode === 'selected' ? 'selected' : 'all';
-  return NextResponse.json({ connected: true, targets, target_mode: mode, selected_ids: mode === 'selected' ? selectedIds : [] });
+  const selectedIds = [...new Set(integrations.flatMap((row: any) => { const rowConfig = row.config || {}; const id = channel === 'facebook_messenger' ? rowConfig.page_id : rowConfig.instagram_account_id; return id ? [String(id)] : []; }))];
+  return NextResponse.json({ connected: true, targets, target_mode: config.target_mode === 'selected' ? 'selected' : 'all', selected_ids: config.target_mode === 'selected' ? selectedIds : [] });
 }
 
 export async function PUT(req: NextRequest) {
@@ -111,7 +104,6 @@ export async function PUT(req: NextRequest) {
   const selectedIds = Array.isArray(body?.selected_ids) ? body.selected_ids.map(String).filter(Boolean) : [];
   if (!businessId || !channel) return NextResponse.json({ error: 'business_id and channel are required' }, { status: 400 });
   if (targetMode === 'selected' && !selectedIds.length) return NextResponse.json({ error: 'Select at least one target or choose All.' }, { status: 400 });
-
   const context = await getBusinessContext(businessId);
   if ('error' in context) return NextResponse.json({ error: context.error }, { status: context.error === 'Not authenticated' ? 401 : 403 });
   const { service } = context;
@@ -127,10 +119,6 @@ export async function PUT(req: NextRequest) {
   const { data: integrations } = await service.from('integrations').select('id, name, config, status').eq('business_id', businessId).eq('type', channel);
   const connected = (integrations || []).filter((row: any) => row.status === 'connected');
   if (!connected.length) return NextResponse.json({ error: `No connected ${channel} integration found.` }, { status: 404 });
-
-  // The Meta webhook already routes by Page ID / Instagram account ID. We use
-  // one integration row per target so every selected target retains its own
-  // Page access token. This avoids changing the live webhook contract.
   const base = connected[0];
   const baseConfig = { ...((base.config || {}) as IntegrationConfig) };
   const pageTargets = Array.isArray(baseConfig.page_targets) ? baseConfig.page_targets : [];
@@ -142,9 +130,10 @@ export async function PUT(req: NextRequest) {
         const id = String(target.id || '');
         if (!id) continue;
         const existing = connected.find((row: any) => String(row.config?.[targetField] || '') === id);
-        const nextConfig = { ...baseConfig, ...targetField === 'page_id' ? { page_id: String(target.page_id || id), page_name: target.name, access_token: target.access_token, page_access_token: target.access_token } : { instagram_account_id: id, instagram_account_name: target.name, page_id: String(target.page_id || ''), access_token: target.access_token, page_access_token: target.access_token } };
-        nextConfig.target_mode = 'all';
-        nextConfig.selected_target_ids = [];
+        const targetConfig = targetField === 'page_id'
+          ? { page_id: String(target.page_id || id), page_name: target.name, access_token: target.access_token, page_access_token: target.access_token }
+          : { instagram_account_id: id, instagram_account_name: target.name, page_id: String(target.page_id || ''), access_token: target.access_token, page_access_token: target.access_token };
+        const nextConfig = { ...baseConfig, ...targetConfig, target_mode: 'all', selected_target_ids: [] };
         if (existing) await service.from('integrations').update({ name: target.name || existing.name, status: 'connected', config: nextConfig }).eq('id', existing.id);
         else await service.from('integrations').insert({ business_id: businessId, type: channel, name: target.name || `${channel} target`, status: 'connected', config: nextConfig });
       }
