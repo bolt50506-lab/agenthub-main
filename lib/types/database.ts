@@ -346,6 +346,21 @@ export interface LeadActivity {
   created_at: string;
 }
 
+export interface Service {
+  id: string;
+  business_id: string;
+  name: string;
+  description: string | null;
+  price: number | null;
+  currency: string;
+  duration_minutes: number | null;
+  advance_required: number;
+  status: 'active' | 'inactive';
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Appointment {
   id: string;
   business_id: string;
@@ -357,6 +372,13 @@ export interface Appointment {
   end_time: string;
   status: AppointmentStatus;
   notes: string | null;
+  service_id?: string | null;
+  service_name?: string | null;
+  service_price?: number | null;
+  currency?: string;
+  advance_required?: number;
+  amount_paid?: number;
+  payment_status?: 'unpaid' | 'partial' | 'paid';
   created_by: string | null;
   created_at: string;
   updated_at: string;
