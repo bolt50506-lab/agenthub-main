@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogT
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Upload, Image as ImageIcon, FileText, MoreVertical, Trash2, AlertCircle, Check, Loader2, Eye } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import type { MediaDocument, ImageAnalysisResult, MediaType, ConfidenceLevel, VerificationStatus } from '@/lib/types/database';
+import type { MediaDocument, ImageAnalysisResult, MediaType, VerificationStatus } from '@/lib/types/database';
 
 const MEDIA_CATEGORIES: { value: MediaType; label: string }[] = [
   { value: 'general', label: 'General' },
@@ -26,7 +26,7 @@ const MEDIA_CATEGORIES: { value: MediaType; label: string }[] = [
 ];
 
 export default function MediaPage() {
-  const { activeBusiness } = useAuth();
+  const { activeBusiness, session } = useAuth();
   const { toast } = useToast();
   const [media, setMedia] = useState<MediaDocument[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,12 +46,38 @@ export default function MediaPage() {
 
   useEffect(() => { fetchMedia(); }, [fetchMedia]);
 
+  const analyzeUploadedImage = async (mediaId: string) => {
+    if (!activeBusiness || !session?.access_token) return;
+    try {
+      const response = await fetch('/api/media/analyze', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ media_id: mediaId, business_id: activeBusiness.id }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        console.error('[Media] AI analysis failed:', result?.error || response.statusText);
+        toast({ title: 'Image uploaded', description: result?.error || 'AI analysis could not be completed.', variant: 'destructive' });
+        return;
+      }
+      await fetchMedia();
+      toast({ title: 'Image analyzed', description: result.confidence ? `Text extracted with ${result.confidence} confidence.` : 'AI analysis completed.' });
+    } catch (error) {
+      console.error('[Media] AI analysis request failed:', error);
+      toast({ title: 'Image uploaded', description: 'AI analysis could not be completed.', variant: 'destructive' });
+    }
+  };
+
   const handleUpload = async () => {
     if (!selectedFile || !activeBusiness) return;
+    const fileToUpload = selectedFile;
     setUploading(true);
-    const fileExt = selectedFile.name.split('.').pop();
+    const fileExt = fileToUpload.name.split('.').pop();
     const fileName = `${activeBusiness.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
-    const { error: uploadError } = await supabase.storage.from('media').upload(fileName, selectedFile);
+    const { error: uploadError } = await supabase.storage.from('media').upload(fileName, fileToUpload);
     if (uploadError) {
       toast({ title: 'Upload failed', description: uploadError.message, variant: 'destructive' });
       setUploading(false);
@@ -59,23 +85,30 @@ export default function MediaPage() {
     }
     const { data: mediaData, error: dbError } = await supabase.from('media_documents').insert({
       business_id: activeBusiness.id,
-      file_name: selectedFile.name,
+      file_name: fileToUpload.name,
       file_path: fileName,
-      file_type: selectedFile.type.startsWith('image/') ? 'image' : 'document',
-      file_size: selectedFile.size,
-      mime_type: selectedFile.type,
+      file_type: fileToUpload.type.startsWith('image/') ? 'image' : 'document',
+      file_size: fileToUpload.size,
+      mime_type: fileToUpload.type,
       category: uploadCategory,
     }).select().maybeSingle();
 
-    if (!dbError && mediaData) {
-      // Create a default "not_configured" analysis result for images
-      if (selectedFile.type.startsWith('image/')) {
-        await supabase.from('image_analysis_results').insert({
+    if (dbError) {
+      await supabase.storage.from('media').remove([fileName]);
+      toast({ title: 'Upload failed', description: dbError.message, variant: 'destructive' });
+      setUploading(false);
+      return;
+    }
+
+    if (mediaData) {
+      if (fileToUpload.type.startsWith('image/')) {
+        const { error: analysisRecordError } = await supabase.from('image_analysis_results').upsert({
           business_id: activeBusiness.id,
           media_document_id: mediaData.id,
-          processing_status: 'not_configured',
+          processing_status: 'processing',
           verification_status: 'unverified',
-        });
+        }, { onConflict: 'media_document_id' });
+        if (analysisRecordError) console.error('[Media] Analysis record error:', analysisRecordError);
       }
       await supabase.from('activity_logs').insert({
         business_id: activeBusiness.id, action: 'uploaded_media', entity_type: 'media_document', entity_id: mediaData.id,
@@ -86,7 +119,11 @@ export default function MediaPage() {
     setSelectedFile(null);
     setUploadOpen(false);
     await fetchMedia();
-    toast({ title: 'File uploaded', description: selectedFile.name });
+    toast({ title: 'File uploaded', description: fileToUpload.name });
+
+    if (mediaData && fileToUpload.type.startsWith('image/')) {
+      void analyzeUploadedImage(mediaData.id);
+    }
   };
 
   const handleDelete = async () => {
@@ -182,13 +219,11 @@ export default function MediaPage() {
         </div>
       )}
 
-      {/* Analysis Detail Dialog */}
       <Dialog open={!!analysisDetail} onOpenChange={(open) => !open && setAnalysisDetail(null)}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Image Analysis</DialogTitle></DialogHeader>
           {analysisDetail && (
             <div className="space-y-4 py-4">
-              {/* Original Image */}
               <div className="space-y-2">
                 <Label>Original Image</Label>
                 <div className="rounded-lg border border-border overflow-hidden bg-muted">
@@ -196,15 +231,12 @@ export default function MediaPage() {
                 </div>
               </div>
 
-              {/* Analysis Status */}
               {analysisDetail.analysis ? (
                 <>
                   <div className="flex items-center gap-2">
                     <Badge variant="outline" className="capitalize">{analysisDetail.analysis.processing_status.replace(/_/g, ' ')}</Badge>
                     <Badge variant="outline" className="capitalize">{analysisDetail.analysis.verification_status.replace(/_/g, ' ')}</Badge>
-                    {analysisDetail.analysis.confidence && (
-                      <Badge variant="outline" className="capitalize">Confidence: {analysisDetail.analysis.confidence}</Badge>
-                    )}
+                    {analysisDetail.analysis.confidence && <Badge variant="outline" className="capitalize">Confidence: {analysisDetail.analysis.confidence}</Badge>}
                   </div>
 
                   {analysisDetail.analysis.processing_status === 'not_configured' ? (
@@ -217,13 +249,11 @@ export default function MediaPage() {
                     </div>
                   ) : (
                     <>
-                      {/* Extracted Text */}
                       <div className="space-y-2">
                         <Label>Extracted Text</Label>
-                        <div className="p-3 rounded-lg border border-border bg-muted/50 text-sm">{analysisDetail.analysis.extracted_text || 'No text extracted.'}</div>
+                        <div className="p-3 rounded-lg border border-border bg-muted/50 text-sm whitespace-pre-wrap">{analysisDetail.analysis.extracted_text || 'No text extracted.'}</div>
                       </div>
 
-                      {/* Uncertain Segments */}
                       {analysisDetail.analysis.uncertain_segments?.length > 0 && (
                         <div className="space-y-2">
                           <Label>Uncertain Text Segments</Label>
@@ -238,37 +268,21 @@ export default function MediaPage() {
                         </div>
                       )}
 
-                      {/* Corrected Text */}
                       <div className="space-y-2">
                         <Label>Corrected Text (manual)</Label>
-                        <Textarea
-                          defaultValue={analysisDetail.analysis.corrected_text ?? ''}
-                          onBlur={(e) => saveCorrectedText(e.target.value)}
-                          rows={3}
-                          placeholder="Manually correct the extracted text here..."
-                        />
+                        <Textarea defaultValue={analysisDetail.analysis.corrected_text ?? ''} onBlur={(e) => saveCorrectedText(e.target.value)} rows={3} placeholder="Manually correct the extracted text here..." />
                       </div>
 
-                      {/* Verification */}
                       <div className="flex items-center gap-2 pt-2 border-t border-border">
                         <Label>Verification:</Label>
-                        <Button size="sm" variant={analysisDetail.analysis.verification_status === 'verified' ? 'default' : 'outline'} onClick={() => updateVerification('verified')}>
-                          <Check className="w-3.5 h-3.5 mr-1" /> Verified
-                        </Button>
-                        <Button size="sm" variant={analysisDetail.analysis.verification_status === 'needs_review' ? 'default' : 'outline'} onClick={() => updateVerification('needs_review')}>
-                          Needs Review
-                        </Button>
-                        <Button size="sm" variant={analysisDetail.analysis.verification_status === 'unverified' ? 'default' : 'outline'} onClick={() => updateVerification('unverified')}>
-                          Unverified
-                        </Button>
+                        <Button size="sm" variant={analysisDetail.analysis.verification_status === 'verified' ? 'default' : 'outline'} onClick={() => updateVerification('verified')}><Check className="w-3.5 h-3.5 mr-1" /> Verified</Button>
+                        <Button size="sm" variant={analysisDetail.analysis.verification_status === 'needs_review' ? 'default' : 'outline'} onClick={() => updateVerification('needs_review')}>Needs Review</Button>
+                        <Button size="sm" variant={analysisDetail.analysis.verification_status === 'unverified' ? 'default' : 'outline'} onClick={() => updateVerification('unverified')}>Unverified</Button>
                       </div>
 
-                      {/* Medical Disclaimer */}
                       {analysisDetail.media.category === 'prescription' && (
                         <div className="p-3 rounded-lg bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800">
-                          <p className="text-xs text-orange-700 dark:text-orange-400">
-                            <strong>Important:</strong> Extracted prescription text requires human/pharmacy verification before acting on it. This system does not diagnose medical conditions or recommend dosages.
-                          </p>
+                          <p className="text-xs text-orange-700 dark:text-orange-400"><strong>Important:</strong> Extracted prescription text requires human/pharmacy verification before acting on it. This system does not diagnose medical conditions or recommend dosages.</p>
                         </div>
                       )}
                     </>
@@ -282,7 +296,6 @@ export default function MediaPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation */}
       <Dialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>
         <DialogContent>
           <DialogHeader><DialogTitle>Delete this file?</DialogTitle></DialogHeader>
