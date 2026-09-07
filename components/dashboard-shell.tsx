@@ -44,6 +44,7 @@ const NAV_ITEMS = [
   { href: '/dashboard/products', label: 'Products & Services', icon: Package },
   { href: '/dashboard/media', label: 'Media & Documents', icon: Image },
   { href: '/dashboard/group-rules', label: 'Group Rules', icon: Users },
+  { href: '/dashboard/channel-targeting', label: 'Channel Targeting', icon: Plug },
   { href: '/dashboard/integrations', label: 'Integrations', icon: Plug },
   { href: '/dashboard/voice-studio', label: 'Voice Studio', icon: Mic2 },
   { href: '/dashboard/team', label: 'Team', icon: UserCog },
