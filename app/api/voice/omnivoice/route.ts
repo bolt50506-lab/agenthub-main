@@ -76,15 +76,15 @@ export async function POST(req: NextRequest) {
     }
 
     await supabase.from('voice_profiles').update({ is_default: false }).eq('business_id', businessId).eq('provider', 'omnivoice').eq('is_default', true);
+    // voice_profiles.clone_type is constrained to the existing application values
+    // "instant" and "professional". OmniVoice uses zero-shot/reference-audio cloning,
+    // so store it as the closest supported application type: "instant".
     const payload = {
       business_id: businessId, name, description: description || null, provider: 'omnivoice', provider_voice_id: providerVoiceId,
-      clone_type: 'zero-shot', status: 'active', requires_verification: false, is_default: true, preview_url: null,
+      clone_type: 'instant', status: 'active', requires_verification: false, is_default: true, preview_url: null,
       language, consent_confirmed_at: new Date().toISOString(), created_by: userId
     };
 
-    // Prefer service-role for server-side writes. If the Vercel deployment does not
-    // have the service key configured, retry through the authenticated RLS policy
-    // instead of surfacing the confusing "new row violates row-level security" error.
     let voiceProfile: any = null;
     let insertError: any = null;
     const firstInsert = await supabase.from('voice_profiles').insert(payload).select('id, business_id, name, description, provider, clone_type, status, requires_verification, is_default, preview_url, language, created_at').single();
@@ -92,12 +92,10 @@ export async function POST(req: NextRequest) {
     insertError = firstInsert.error;
 
     if (insertError && /row-level security|permission denied/i.test(insertError.message || '')) {
-      const userClient = createServerClient ? await createServerClient() : null;
-      if (userClient) {
-        const retry = await userClient.from('voice_profiles').insert(payload).select('id, business_id, name, description, provider, clone_type, status, requires_verification, is_default, preview_url, language, created_at').single();
-        voiceProfile = retry.data;
-        insertError = retry.error;
-      }
+      const userClient = await createServerClient();
+      const retry = await userClient.from('voice_profiles').insert(payload).select('id, business_id, name, description, provider, clone_type, status, requires_verification, is_default, preview_url, language, created_at').single();
+      voiceProfile = retry.data;
+      insertError = retry.error;
     }
 
     if (insertError) {
