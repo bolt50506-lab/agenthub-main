@@ -222,3 +222,23 @@ BEGIN
 END $$;
 DROP TRIGGER IF EXISTS trg_issue_customer_payment_receipt ON customer_payments;
 CREATE TRIGGER trg_issue_customer_payment_receipt AFTER INSERT OR UPDATE ON customer_payments FOR EACH ROW EXECUTE FUNCTION issue_customer_payment_receipt();
+
+
+CREATE OR REPLACE FUNCTION mark_lead_converted_from_paid_order()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE v_lead uuid; v_currency text;
+BEGIN
+  IF NEW.status='approved' AND NEW.order_id IS NOT NULL AND (TG_OP='INSERT' OR OLD.status IS DISTINCT FROM 'approved') THEN
+    SELECT lead_id,currency INTO v_lead,v_currency FROM orders WHERE id=NEW.order_id;
+    IF v_lead IS NOT NULL THEN
+      UPDATE leads SET status='won', converted_at=COALESCE(converted_at,now()),
+        conversion_amount=COALESCE(conversion_amount,NEW.amount),
+        conversion_currency=COALESCE(conversion_currency,NEW.currency,v_currency),
+        conversion_notes=COALESCE(conversion_notes,'Converted after approved customer payment')
+      WHERE id=v_lead;
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS trg_mark_lead_converted_from_paid_order ON customer_payments;
+CREATE TRIGGER trg_mark_lead_converted_from_paid_order AFTER INSERT OR UPDATE ON customer_payments FOR EACH ROW EXECUTE FUNCTION mark_lead_converted_from_paid_order();
