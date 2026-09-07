@@ -30,6 +30,7 @@ export default function ChannelTargetingPage() {
   const [error, setError] = useState('');
 
   const current = useMemo(() => CHANNELS.find((item) => item.id === channel)!, [channel]);
+  const CurrentIcon = current.icon;
 
   async function loadTargets() {
     if (!activeBusiness?.id) return;
@@ -112,7 +113,7 @@ export default function ChannelTargetingPage() {
         <CardHeader>
           <div className="flex items-start justify-between gap-4">
             <div>
-              <CardTitle className="flex items-center gap-2"><current.icon className="h-5 w-5" />{current.label}</CardTitle>
+              <CardTitle className="flex items-center gap-2"><CurrentIcon className="h-5 w-5" />{current.label}</CardTitle>
               <CardDescription className="mt-1">{current.description}</CardDescription>
             </div>
             <Button variant="outline" size="sm" onClick={loadTargets} disabled={loading} className="gap-2"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />Refresh</Button>
