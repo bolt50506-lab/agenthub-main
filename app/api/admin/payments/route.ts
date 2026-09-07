@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { activateCheckoutOrder } from '@/lib/payments/activate-checkout-order';
+import { deliverPendingNotifications } from '@/lib/notifications/deliver';
 
 export const runtime = 'nodejs';
 
@@ -48,6 +49,7 @@ export async function POST(req: NextRequest) {
   }
   try {
     await activateCheckoutOrder(supabase, order, admin.id);
+    await deliverPendingNotifications(supabase, 10).catch(() => null);
     return NextResponse.json({ ok: true, status: 'fulfilled' });
   } catch (e) {
     await supabase.from('public_checkout_orders').update({ status: 'pending_review', rejection_reason: e instanceof Error ? e.message : 'Activation failed.' }).eq('id', order.id);
