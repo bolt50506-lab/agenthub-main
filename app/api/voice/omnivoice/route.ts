@@ -32,7 +32,7 @@ async function serviceRequest(baseUrl: string, path: string, init?: RequestInit)
 }
 
 async function cleanupProviderProfile(baseUrl: string, providerVoiceId: string) {
-  await serviceRequest(baseUrl, `/profiles/${encodeURIComponent(providerVoiceId)}`, { method: 'DELETE' }).catch(() => null);
+  try { await serviceRequest(baseUrl, `/profiles/${encodeURIComponent(providerVoiceId)}`, { method: 'DELETE' }); } catch { /* cleanup is best-effort */ }
 }
 
 export async function POST(req: NextRequest) {
@@ -78,78 +78,47 @@ export async function POST(req: NextRequest) {
       const sampleResponse = await serviceRequest(baseUrl, `/profiles/${encodeURIComponent(providerVoiceId)}/samples`, { method: 'POST', body: sampleForm });
       if (!sampleResponse.ok) throw new Error((await sampleResponse.text()).slice(0, 1000) || 'OmniVoice rejected the reference audio');
     } catch (error) {
-      await cleanupProviderProfile(baseUrl, providerVoiceId);
-      providerVoiceId = null;
+      await cleanupProviderProfile(baseUrl, providerVoiceId); providerVoiceId = null;
       return NextResponse.json({ error: error instanceof Error ? error.message : 'OmniVoice rejected the reference audio' }, { status: 502 });
     }
 
-    // The production schema has a partial unique index enforcing one active default
-    // voice per business across every provider. Legacy Voicebox profiles can still be
-    // default, so clear ALL active defaults before inserting the OmniVoice profile.
-    const { error: clearDefaultsError } = await supabase.from('voice_profiles')
-      .update({ is_default: false })
-      .eq('business_id', businessId)
-      .eq('status', 'active')
-      .eq('is_default', true);
+    // Idempotency: never create two DB rows for the same OmniVoice profile.
+    const { data: existingProfile } = await supabase.from('voice_profiles').select('id, business_id, name, description, provider, provider_voice_id, clone_type, status, requires_verification, is_default, preview_url, language, created_at').eq('provider', 'omnivoice').eq('provider_voice_id', providerVoiceId).maybeSingle();
+    if (existingProfile) {
+      return NextResponse.json({ success: true, voice: existingProfile, existing: true }, { status: 200 });
+    }
+
+    // Clear any existing business-wide default, including legacy providers.
+    const { error: clearDefaultsError } = await supabase.from('voice_profiles').update({ is_default: false }).eq('business_id', businessId).eq('status', 'active').eq('is_default', true);
     if (clearDefaultsError) {
-      await cleanupProviderProfile(baseUrl, providerVoiceId);
-      providerVoiceId = null;
+      await cleanupProviderProfile(baseUrl, providerVoiceId); providerVoiceId = null;
       return NextResponse.json({ error: `Unable to prepare default voice slot: ${clearDefaultsError.message}` }, { status: 500 });
     }
 
-    const payload = {
-      business_id: businessId,
-      name,
-      description: description || null,
-      provider: 'omnivoice',
-      provider_voice_id: providerVoiceId,
-      clone_type: 'instant',
-      status: 'active',
-      requires_verification: false,
-      is_default: false,
-      preview_url: null,
-      language,
-      consent_confirmed_at: new Date().toISOString(),
-      created_by: userId,
-    };
-
-    // Insert as non-default first. This avoids the business-wide default unique index
-    // during the row creation and lets the subsequent UPDATE establish the default.
-    let voiceProfile: any = null;
-    let insertError: any = null;
-    const firstInsert = await supabase.from('voice_profiles').insert(payload).select('id, business_id, name, description, provider, provider_voice_id, clone_type, status, requires_verification, is_default, preview_url, language, created_at').single();
-    voiceProfile = firstInsert.data;
-    insertError = firstInsert.error;
-
-    if (insertError && /row-level security|permission denied/i.test(insertError.message || '')) {
-      const userClient = await createServerClient();
-      const retry = await userClient.from('voice_profiles').insert(payload).select('id, business_id, name, description, provider, provider_voice_id, clone_type, status, requires_verification, is_default, preview_url, language, created_at').single();
-      voiceProfile = retry.data;
-      insertError = retry.error;
+    const payload = { business_id: businessId, name, description: description || null, provider: 'omnivoice', provider_voice_id: providerVoiceId, clone_type: 'instant', status: 'active', requires_verification: false, is_default: false, preview_url: null, language, consent_confirmed_at: new Date().toISOString(), created_by: userId };
+    const selectedColumns = 'id, business_id, name, description, provider, provider_voice_id, clone_type, status, requires_verification, is_default, preview_url, language, created_at';
+    const firstInsert = await supabase.from('voice_profiles').insert(payload).select(selectedColumns).single();
+    if (firstInsert.error) {
+      // A concurrent request may have won the insert. Return its row instead of failing.
+      if (firstInsert.error.code === '23505' || /duplicate key|unique constraint/i.test(firstInsert.error.message || '')) {
+        const { data: concurrent } = await supabase.from('voice_profiles').select(selectedColumns).eq('provider', 'omnivoice').eq('provider_voice_id', providerVoiceId).maybeSingle();
+        if (concurrent) return NextResponse.json({ success: true, voice: concurrent, existing: true }, { status: 200 });
+      }
+      await cleanupProviderProfile(baseUrl, providerVoiceId); providerVoiceId = null;
+      return NextResponse.json({ error: firstInsert.error.message }, { status: firstInsert.error.code === '23505' ? 409 : 500 });
     }
+    createdDbVoiceId = firstInsert.data.id;
 
-    if (insertError) {
-      await cleanupProviderProfile(baseUrl, providerVoiceId);
-      providerVoiceId = null;
-      return NextResponse.json({ error: insertError.message }, { status: /duplicate key|unique constraint/i.test(insertError.message || '') ? 409 : (/limit reached/i.test(insertError.message) ? 403 : 500) });
-    }
-    createdDbVoiceId = voiceProfile.id;
-
-    const { data: defaultedProfile, error: defaultError } = await supabase.from('voice_profiles')
-      .update({ is_default: true })
-      .eq('id', voiceProfile.id)
-      .select('id, business_id, name, description, provider, provider_voice_id, clone_type, status, requires_verification, is_default, preview_url, language, created_at')
-      .single();
+    const { data: defaultedProfile, error: defaultError } = await supabase.from('voice_profiles').update({ is_default: true }).eq('id', createdDbVoiceId).select(selectedColumns).single();
     if (defaultError) {
-      await supabase.from('voice_profiles').delete().eq('id', voiceProfile.id);
-      await cleanupProviderProfile(baseUrl, providerVoiceId);
-      providerVoiceId = null;
-      return NextResponse.json({ error: defaultError.message }, { status: /duplicate key|unique constraint/i.test(defaultError.message || '') ? 409 : 500 });
+      await supabase.from('voice_profiles').delete().eq('id', createdDbVoiceId);
+      await cleanupProviderProfile(baseUrl, providerVoiceId); providerVoiceId = null;
+      return NextResponse.json({ error: defaultError.message }, { status: defaultError.code === '23505' ? 409 : 500 });
     }
 
     return NextResponse.json({ success: true, voice: defaultedProfile }, { status: 201 });
   } catch (error) {
-    if (createdDbVoiceId) await createServiceClient().from('voice_profiles').delete().eq('id', createdDbVoiceId);
+    if (createdDbVoiceId) { try { await createServiceClient().from('voice_profiles').delete().eq('id', createdDbVoiceId); } catch { /* best-effort */ } }
     if (providerVoiceId) await cleanupProviderProfile(baseUrl, providerVoiceId);
     console.error('[OmniVoice] Clone failed:', error);
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to create OmniVoice clone' }, { status: 500 });
