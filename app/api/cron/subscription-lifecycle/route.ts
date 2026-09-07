@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   const now = new Date();
   const { data: subscriptions, error } = await supabase
     .from('business_subscriptions')
-    .select('id,business_id,status,end_date,grace_end_date,reminder_stage')
+    .select('id,business_id,plan_id,billing_cycle,status,end_date,grace_end_date,reminder_stage')
     .in('status', ['active','trial','suspended']);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -24,11 +24,44 @@ export async function GET(req: NextRequest) {
   let graceStarted = 0;
   let suspended = 0;
   let reminders = 0;
+  let invoicesCreated = 0;
 
   for (const sub of subscriptions ?? []) {
     if (!sub.end_date) continue;
     const end = new Date(sub.end_date);
     const graceEnd = sub.grace_end_date ? new Date(sub.grace_end_date) : null;
+
+    // Create the next renewal bill before expiry so the business can see the
+    // exact amount and period in My Billing even before making the payment.
+    if ((sub.status === 'active' || sub.status === 'trial') && end >= now) {
+      const daysToEnd = Math.ceil((end.getTime() - now.getTime()) / 86400000);
+      if (daysToEnd <= 7) {
+        const { data: existingBill } = await supabase.from('subscription_invoices')
+          .select('id').eq('subscription_id', sub.id).in('status',['pending','overdue'])
+          .gte('billing_period_start', end.toISOString()).limit(1).maybeSingle();
+        if (!existingBill) {
+          const { data: plan } = await supabase.from('subscription_plans').select('price_cents,yearly_price_cents,currency').eq('id', sub.plan_id).maybeSingle();
+          const nextEnd = new Date(end);
+          if (sub.billing_cycle === 'yearly') nextEnd.setFullYear(nextEnd.getFullYear() + 1);
+          else nextEnd.setMonth(nextEnd.getMonth() + 1);
+          const amountCents = sub.billing_cycle === 'yearly' ? Number(plan?.yearly_price_cents || 0) : Number(plan?.price_cents || 0);
+          const invoiceNumber = 'REN-' + end.toISOString().slice(0,10).replace(/-/g,'') + '-' + String(sub.business_id).replace(/-/g,'').slice(0,8).toUpperCase();
+          await supabase.from('subscription_invoices').upsert({
+            business_id: sub.business_id,
+            subscription_id: sub.id,
+            invoice_number: invoiceNumber,
+            billing_period_start: end.toISOString(),
+            billing_period_end: nextEnd.toISOString(),
+            amount: amountCents / 100,
+            currency: plan?.currency || 'USD',
+            status: 'pending',
+            due_date: end.toISOString(),
+            metadata: { renewal: true, billing_cycle: sub.billing_cycle },
+          }, { onConflict: 'invoice_number' });
+          invoicesCreated++;
+        }
+      }
+    }
 
     if ((sub.status === 'active' || sub.status === 'trial') && end < now && !graceEnd) {
       const newGraceEnd = new Date(end);
@@ -70,5 +103,5 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ok: true, graceStarted, reminders, suspended });
+  return NextResponse.json({ ok: true, graceStarted, reminders, suspended, invoicesCreated });
 }
