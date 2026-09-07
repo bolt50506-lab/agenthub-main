@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServiceClient } from '@/lib/supabase/server';
+import { createServerClient, createServiceClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -22,7 +22,7 @@ async function requireBusinessManager(req: NextRequest, businessId: string) {
   ]);
   const allowed = profile?.is_super_admin === true || (membership?.status === 'active' && ['owner','admin'].includes(membership.role));
   if (!allowed) return { error: 'You do not have permission to manage voices for this business', status: 403 as const };
-  return { supabase, userId: userData.user.id };
+  return { supabase, userId: userData.user.id, token };
 }
 
 async function serviceRequest(baseUrl: string, path: string, init?: RequestInit) {
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
 
     const auth = await requireBusinessManager(req, businessId);
     if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
-    const { supabase, userId } = auth;
+    const { supabase, userId, token } = auth;
     const [{ data: business }, { data: limit, error: limitError }] = await Promise.all([
       supabase.from('businesses').select('name').eq('id', businessId).maybeSingle(),
       supabase.rpc('check_plan_limit', { p_business_id: businessId, p_limit_type: 'max_voice_clones' }),
@@ -75,15 +75,31 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: error instanceof Error ? error.message : 'OmniVoice rejected the reference audio' }, { status: 502 });
     }
 
-    // OmniVoice is the only provider represented in Voice Studio. Make the new
-    // clone the default among OmniVoice profiles so an older Voicebox default
-    // can never hijack WhatsApp voice synthesis.
     await supabase.from('voice_profiles').update({ is_default: false }).eq('business_id', businessId).eq('provider', 'omnivoice').eq('is_default', true);
-    const { data: voiceProfile, error: insertError } = await supabase.from('voice_profiles').insert({
+    const payload = {
       business_id: businessId, name, description: description || null, provider: 'omnivoice', provider_voice_id: providerVoiceId,
       clone_type: 'zero-shot', status: 'active', requires_verification: false, is_default: true, preview_url: null,
       language, consent_confirmed_at: new Date().toISOString(), created_by: userId
-    }).select('id, business_id, name, description, provider, clone_type, status, requires_verification, is_default, preview_url, language, created_at').single();
+    };
+
+    // Prefer service-role for server-side writes. If the Vercel deployment does not
+    // have the service key configured, retry through the authenticated RLS policy
+    // instead of surfacing the confusing "new row violates row-level security" error.
+    let voiceProfile: any = null;
+    let insertError: any = null;
+    const firstInsert = await supabase.from('voice_profiles').insert(payload).select('id, business_id, name, description, provider, clone_type, status, requires_verification, is_default, preview_url, language, created_at').single();
+    voiceProfile = firstInsert.data;
+    insertError = firstInsert.error;
+
+    if (insertError && /row-level security|permission denied/i.test(insertError.message || '')) {
+      const userClient = createServerClient ? await createServerClient() : null;
+      if (userClient) {
+        const retry = await userClient.from('voice_profiles').insert(payload).select('id, business_id, name, description, provider, clone_type, status, requires_verification, is_default, preview_url, language, created_at').single();
+        voiceProfile = retry.data;
+        insertError = retry.error;
+      }
+    }
+
     if (insertError) {
       await serviceRequest(baseUrl, `/profiles/${encodeURIComponent(providerVoiceId)}`, { method: 'DELETE' }).catch(() => null);
       return NextResponse.json({ error: insertError.message }, { status: /limit reached/i.test(insertError.message) ? 403 : 500 });
