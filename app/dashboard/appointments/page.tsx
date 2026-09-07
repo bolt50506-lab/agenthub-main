@@ -31,17 +31,22 @@ export default function AppointmentsPage() {
   const { activeBusiness } = useAuth();
   const { toast } = useToast();
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [services, setServices] = useState<Array<{ id: string; name: string; price: number | null; currency: string; advance_required: number }>>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [ioOpen, setIoOpen] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [form, setForm] = useState({ customer_name: '', date: '', start_time: '09:00', end_time: '09:30', notes: '' });
+  const [form, setForm] = useState({ customer_name: '', service_id: '', service_name: '', service_price: '', currency: 'PKR', advance_required: '0', date: '', start_time: '09:00', end_time: '09:30', notes: '' });
 
   const fetchAppointments = async () => {
     if (!activeBusiness) return;
-    const { data } = await supabase.from('appointments').select('*').eq('business_id', activeBusiness.id).order('date', { ascending: true });
-    setAppointments(data as Appointment[] ?? []);
+    const [aptRes, serviceRes] = await Promise.all([
+      supabase.from('appointments').select('*').eq('business_id', activeBusiness.id).order('date', { ascending: true }),
+      supabase.from('services').select('id,name,price,currency,advance_required').eq('business_id', activeBusiness.id).eq('status','active').order('name'),
+    ]);
+    setAppointments(aptRes.data as Appointment[] ?? []);
+    setServices(serviceRes.data ?? []);
     setLoading(false);
   };
 
@@ -51,7 +56,7 @@ export default function AppointmentsPage() {
     if (!activeBusiness) return;
     setSubmitting(true);
     const { data, error } = await supabase.from('appointments').insert({
-      business_id: activeBusiness.id, ...form, status: 'scheduled',
+      business_id: activeBusiness.id, customer_name: form.customer_name, service_id: form.service_id || null, service_name: form.service_name || null, service_price: form.service_price ? Number(form.service_price) : null, currency: form.currency, advance_required: Number(form.advance_required || 0), date: form.date, start_time: form.start_time, end_time: form.end_time, notes: form.notes || null, status: 'scheduled',
     }).select().maybeSingle();
     if (!error && data) {
       await supabase.from('activity_logs').insert({
@@ -60,7 +65,7 @@ export default function AppointmentsPage() {
     }
     setSubmitting(false);
     setCreateOpen(false);
-    setForm({ customer_name: '', date: '', start_time: '09:00', end_time: '09:30', notes: '' });
+    setForm({ customer_name: '', service_id: '', service_name: '', service_price: '', currency: 'PKR', advance_required: '0', date: '', start_time: '09:00', end_time: '09:30', notes: '' });
     await fetchAppointments();
     toast({ title: 'Appointment created' });
   };
@@ -91,6 +96,8 @@ export default function AppointmentsPage() {
             <DialogHeader><DialogTitle>Schedule New Appointment</DialogTitle></DialogHeader>
             <div className="space-y-4 py-4">
               <div className="space-y-2"><Label>Customer Name</Label><Input value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} /></div>
+              <div className="space-y-2"><Label>Service</Label><Select value={form.service_id} onValueChange={(id) => { const service = services.find((x) => x.id === id); setForm({ ...form, service_id: id, service_name: service?.name || '', service_price: service?.price != null ? String(service.price) : '', currency: service?.currency || 'PKR', advance_required: String(service?.advance_required || 0) }); }}><SelectTrigger><SelectValue placeholder="Select service" /></SelectTrigger><SelectContent>{services.map((service) => <SelectItem key={service.id} value={service.id}>{service.name} — {service.currency} {Number(service.price || 0).toLocaleString()}</SelectItem>)}</SelectContent></Select></div>
+              <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-4"><div className="space-y-2"><Label>Service Price</Label><Input type="number" value={form.service_price} onChange={(e) => setForm({ ...form, service_price: e.target.value })} /></div><div className="space-y-2"><Label>Advance Required</Label><Input type="number" value={form.advance_required} onChange={(e) => setForm({ ...form, advance_required: e.target.value })} /></div></div>
               <div className="grid grid-cols-1 min-[420px]:grid-cols-2 md:grid-cols-3 gap-4">
                 <div className="space-y-2"><Label>Date</Label><Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></div>
                 <div className="space-y-2"><Label>Start Time</Label><Input type="time" value={form.start_time} onChange={(e) => setForm({ ...form, start_time: e.target.value })} /></div>
@@ -126,7 +133,7 @@ export default function AppointmentsPage() {
               <Table>
                 <TableHeader><TableRow>
                   <TableHead>Customer</TableHead><TableHead>Date</TableHead><TableHead>Time</TableHead>
-                  <TableHead>Status</TableHead><TableHead>Notes</TableHead><TableHead>Actions</TableHead>
+                  <TableHead>Service / Price</TableHead><TableHead>Payment</TableHead><TableHead>Status</TableHead><TableHead>Notes</TableHead><TableHead>Actions</TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
                   {appointments.map((apt) => {
@@ -136,6 +143,8 @@ export default function AppointmentsPage() {
                         <TableCell className="font-medium">{apt.customer_name || 'Unknown'}</TableCell>
                         <TableCell>{apt.date}</TableCell>
                         <TableCell>{apt.start_time} - {apt.end_time}</TableCell>
+                        <TableCell>{(apt as any).service_name || '-'}<div className="text-xs text-muted-foreground">{(apt as any).service_price != null ? ((apt as any).currency || 'PKR') + ' ' + Number((apt as any).service_price).toLocaleString() : ''}</div></TableCell>
+                        <TableCell><Badge variant="secondary">{(apt as any).payment_status || 'unpaid'}</Badge><div className="text-xs text-muted-foreground">{(apt as any).amount_paid ? ((apt as any).currency || 'PKR') + ' ' + Number((apt as any).amount_paid).toLocaleString() : ''}</div></TableCell>
                         <TableCell><Badge className={statusInfo?.color} variant="secondary">{statusInfo?.label ?? apt.status}</Badge></TableCell>
                         <TableCell className="text-muted-foreground text-sm max-w-xs truncate">{apt.notes || '-'}</TableCell>
                         <TableCell>
