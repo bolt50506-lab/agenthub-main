@@ -155,9 +155,11 @@ CREATE TABLE IF NOT EXISTS channel_notifications (
 );
 CREATE INDEX IF NOT EXISTS idx_channel_notifications_pending ON channel_notifications(status, created_at);
 
-ALTER TABLE payment_receipts
-  ADD CONSTRAINT IF NOT EXISTS payment_receipts_subscription_invoice_fk
-  FOREIGN KEY (subscription_invoice_id) REFERENCES subscription_invoices(id) ON DELETE SET NULL;
+DO $ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='payment_receipts_subscription_invoice_fk') THEN
+    ALTER TABLE payment_receipts ADD CONSTRAINT payment_receipts_subscription_invoice_fk FOREIGN KEY (subscription_invoice_id) REFERENCES subscription_invoices(id) ON DELETE SET NULL;
+  END IF;
+END $;
 
 ALTER TABLE services ENABLE ROW LEVEL SECURITY;
 ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
