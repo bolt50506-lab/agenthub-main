@@ -1,55 +1,48 @@
+import base64
 import cgi
 import json
 import os
+import signal
+import subprocess
 import threading
+import time
 import traceback
+import urllib.error
+import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import numpy as np
 import soundfile as sf
-import torch
-from omnivoice import OmniVoice, OmniVoiceGenerationConfig
 
-MODEL_ID = os.environ.get('OMNIVOICE_MODEL_ID', 'k2-fsa/OmniVoice')
-ASR_MODEL_ID = os.environ.get('OMNIVOICE_ASR_MODEL_ID', 'openai/whisper-small')
 HOST = os.environ.get('HOST', '0.0.0.0')
 PORT = int(os.environ.get('PORT', '7860'))
 SERVICE_SECRET = os.environ.get('AGENTHUB_WEBHOOK_SECRET', '')
 MAX_REFERENCE_SECONDS = 10
 MAX_TEXT_CHARS = 5000
 BASE_DIR = Path(__file__).resolve().parent
-# Keep runtime artifacts under /data when available. Railway volumes can be mounted there,
-# while the bootstrap seed still recreates the Ali profile after a fresh container.
 DATA_DIR = Path('/data/omnivoice') if Path('/data').exists() else BASE_DIR
 PROFILE_DIR = DATA_DIR / 'profiles'
 OUTPUT_DIR = DATA_DIR / 'outputs'
 JOB_DIR = DATA_DIR / 'jobs'
+MODEL_DIR = DATA_DIR / 'models'
 PROFILE_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 JOB_DIR.mkdir(parents=True, exist_ok=True)
+MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
-if torch.cuda.is_available():
-    DEVICE, DTYPE = 'cuda:0', torch.float16
-elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-    DEVICE, DTYPE = 'mps', torch.float16
-else:
-    DEVICE, DTYPE = 'cpu', torch.float32
+ENGINE_PORT = int(os.environ.get('OMNIVOICE_ENGINE_PORT', '8080'))
+ENGINE_URL = f'http://127.0.0.1:{ENGINE_PORT}'
+ENGINE_BIN = os.environ.get('OMNIVOICE_ENGINE_BIN', '/opt/omnivoice/bin/tts-server')
+MODEL_PATH = os.environ.get('OMNIVOICE_GGUF_MODEL', str(MODEL_DIR / 'omnivoice-base-Q4_K_M.gguf'))
+CODEC_PATH = os.environ.get('OMNIVOICE_GGUF_CODEC', str(MODEL_DIR / 'omnivoice-tokenizer-Q4_K_M.gguf'))
+VOICE_NAME = 'ali'
 
-# Avoid unnecessary CPU thread/memory amplification on small Railway instances.
-if DEVICE == 'cpu':
-    torch.set_num_threads(max(1, int(os.environ.get('OMP_NUM_THREADS', '1'))))
-    try:
-        torch.set_num_interop_threads(1)
-    except RuntimeError:
-        pass
-
-print(f'[OmniVoice] model={MODEL_ID} device={DEVICE} dtype={DTYPE}')
-model = None
-model_lock = threading.Lock()
-generation_lock = threading.Lock()
 jobs = {}
+engine_process = None
+engine_lock = threading.Lock()
+generation_lock = threading.Lock()
 
 
 def job_path(job_id):
@@ -77,21 +70,105 @@ def read_job(job_id):
     return None
 
 
-def load_model():
-    global model
-    if model is not None:
-        return model
-    with model_lock:
-        if model is None:
-            print('[OmniVoice] Loading model...')
-            model = OmniVoice.from_pretrained(
-                MODEL_ID,
-                device_map=DEVICE,
-                dtype=DTYPE,
-                asr_model_name=ASR_MODEL_ID,
-            )
-            print('[OmniVoice] Model loaded successfully')
-    return model
+def http_json(url, payload=None, timeout=30):
+    data = None
+    headers = {}
+    method = 'GET'
+    if payload is not None:
+        data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+        headers['Content-Type'] = 'application/json'
+        method = 'POST'
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        return response.status, response.read(), response.headers
+
+
+def wait_for_engine(timeout=300):
+    deadline = time.time() + timeout
+    last_error = None
+    while time.time() < deadline:
+        if engine_process is not None and engine_process.poll() is not None:
+            raise RuntimeError(f'OmniVoice engine exited with code {engine_process.returncode}')
+        try:
+            status, data, _ = http_json(f'{ENGINE_URL}/v1/models', timeout=5)
+            if status == 200:
+                return
+        except Exception as exc:
+            last_error = exc
+        time.sleep(2)
+    raise RuntimeError(f'OmniVoice engine did not become ready: {last_error}')
+
+
+def register_voice(profile):
+    rvq_path = profile.get('reference_rvq')
+    ref_text = (profile.get('reference_text') or '').strip()
+    if not rvq_path or not os.path.exists(rvq_path):
+        raise RuntimeError('Existing Ali voice RVQ reference is missing')
+    if not ref_text:
+        raise RuntimeError('Existing Ali voice reference transcript is missing')
+    payload = {
+        'name': VOICE_NAME,
+        'ref_text': ref_text,
+        'rvq_b64': base64.b64encode(Path(rvq_path).read_bytes()).decode('ascii'),
+    }
+    status, body, _ = http_json(f'{ENGINE_URL}/v1/audio/voices', payload, timeout=120)
+    if status not in (200, 201):
+        raise RuntimeError(f'Voice registration failed: HTTP {status}: {body[:500].decode("utf-8", "replace")}')
+    print(f'[OmniVoice] Existing Ali cloned voice registered as {VOICE_NAME}')
+
+
+def start_engine():
+    global engine_process
+    if engine_process is not None and engine_process.poll() is None:
+        return
+    for path in (MODEL_PATH, CODEC_PATH):
+        if not Path(path).exists():
+            raise RuntimeError(f'OmniVoice GGUF missing: {path}')
+    env = os.environ.copy()
+    env.setdefault('OMP_NUM_THREADS', '1')
+    env.setdefault('OPENBLAS_NUM_THREADS', '1')
+    env.setdefault('MKL_NUM_THREADS', '1')
+    print(f'[OmniVoice] Starting native CPU engine model={MODEL_PATH} codec={CODEC_PATH}')
+    engine_process = subprocess.Popen([
+        ENGINE_BIN,
+        '--model', MODEL_PATH,
+        '--codec', CODEC_PATH,
+        '--port', str(ENGINE_PORT),
+    ], env=env)
+    wait_for_engine()
+    profile = read_profile('8fbf738572e14231b793c1d7651dc331')
+    if not profile:
+        raise RuntimeError('Existing Ali profile is missing')
+    register_voice(profile)
+
+
+def language_value(language):
+    value = (language or 'ur').strip()
+    return value or 'ur'
+
+
+def generate_job(job_id, profile, text, language, instruct=None):
+    try:
+        with generation_lock:
+            payload = {
+                'input': text,
+                'voice': VOICE_NAME,
+                'language': language_value(language),
+                'response_format': 'wav',
+                'seed': -1,
+            }
+            if instruct:
+                payload['instructions'] = str(instruct)
+            status, data, _ = http_json(f'{ENGINE_URL}/v1/audio/speech', payload, timeout=300)
+            if status != 200 or not data:
+                raise RuntimeError(f'Native OmniVoice synthesis failed: HTTP {status}: {data[:1000].decode("utf-8", "replace")}')
+            output = OUTPUT_DIR / f'{job_id}.wav'
+            output.write_bytes(data)
+            save_job(job_id, {'status': 'completed', 'path': str(output)})
+            print(f'[OmniVoice] Generated {job_id} ({len(data)} bytes)')
+    except Exception as exc:
+        traceback.print_exc()
+        save_job(job_id, {'status': 'failed', 'error': str(exc)})
 
 
 def profile_path(profile_id):
@@ -104,9 +181,7 @@ def read_profile(profile_id):
 
 
 def write_profile(profile):
-    profile_path(profile['id']).write_text(
-        json.dumps(profile, ensure_ascii=False, indent=2), encoding='utf-8'
-    )
+    profile_path(profile['id']).write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding='utf-8')
 
 
 def save_reference(file_bytes, filename, profile_id):
@@ -131,49 +206,6 @@ def save_reference(file_bytes, filename, profile_id):
         path.unlink(missing_ok=True)
         raise
     return str(path)
-
-
-def generate_job(job_id, profile, text, language, instruct=None):
-    try:
-        model_instance = load_model()
-        ref_audio = profile.get('reference_audio')
-        ref_text = profile.get('reference_text') or None
-        if not ref_audio or not os.path.exists(ref_audio):
-            raise RuntimeError('Voice reference audio is missing')
-        config = OmniVoiceGenerationConfig(
-            num_step=int(os.environ.get('OMNIVOICE_NUM_STEPS', '16')),
-            denoise=True,
-            preprocess_prompt=True,
-            postprocess_output=True,
-        )
-        # Serialize expensive CPU generations so concurrent WhatsApp requests cannot
-        # multiply peak RAM and trigger another Railway OOM kill.
-        with generation_lock, torch.inference_mode():
-            result = model_instance.generate(
-                text=text,
-                language=language or None,
-                ref_audio=ref_audio,
-                ref_text=ref_text,
-                instruct=instruct,
-                generation_config=config,
-            )
-        if not result:
-            raise RuntimeError('OmniVoice returned no audio')
-        audio = result[0]
-        if isinstance(audio, torch.Tensor):
-            audio = audio.detach().cpu().float().numpy()
-        audio = np.asarray(audio, dtype=np.float32).squeeze()
-        if audio.size == 0:
-            raise RuntimeError('Generated audio is empty')
-        peak = float(np.max(np.abs(audio)))
-        if peak > 0.89:
-            audio = audio * (0.89 / peak)
-        output = OUTPUT_DIR / f'{job_id}.wav'
-        sf.write(str(output), audio, int(getattr(model_instance, 'sampling_rate', 24000)))
-        save_job(job_id, {'status': 'completed', 'path': str(output)})
-    except Exception as exc:
-        traceback.print_exc()
-        save_job(job_id, {'status': 'failed', 'error': str(exc)})
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -203,12 +235,7 @@ class Handler(BaseHTTPRequestHandler):
             'CONTENT_TYPE': self.headers.get('Content-Type', ''),
             'CONTENT_LENGTH': self.headers.get('Content-Length', '0'),
         }
-        form = cgi.FieldStorage(
-            fp=self.rfile,
-            headers=self.headers,
-            environ=env,
-            keep_blank_values=True,
-        )
+        form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ=env, keep_blank_values=True)
         fields, files = {}, []
         for key in form.keys():
             values = form[key] if isinstance(form[key], list) else [form[key]]
@@ -221,7 +248,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == '/health':
-            self._json(200, {'ok': True, 'model': MODEL_ID, 'device': DEVICE})
+            engine_ok = engine_process is not None and engine_process.poll() is None
+            self._json(200 if engine_ok else 503, {'ok': engine_ok, 'engine': 'omnivoice.cpp', 'voice': VOICE_NAME})
             return
         if not self.authorized():
             self._json(401, {'error': 'Unauthorized'})
@@ -240,10 +268,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             path = Path(job['path'])
             if not path.exists():
-                save_job(job_id, {
-                    'status': 'failed',
-                    'error': 'Generated audio is no longer available; retry generation',
-                })
+                save_job(job_id, {'status': 'failed', 'error': 'Generated audio is no longer available; retry generation'})
                 self._json(409, {'error': 'Generated audio is no longer available; retry generation', 'status': 'failed'})
                 return
             data = path.read_bytes()
@@ -257,19 +282,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith('/history/'):
             job_id = self.path.split('/')[2].split('?', 1)[0]
             job = read_job(job_id)
-            # An in-memory-only job can disappear when Railway restarts the container.
-            # Never report that condition as 'pending', otherwise AgentHub polls forever.
             if not job:
-                self._json(200, {
-                    'status': 'failed',
-                    'error': 'Job was lost because the voice service restarted; retry generation',
-                })
+                self._json(200, {'status': 'failed', 'error': 'Job was lost because the voice service restarted; retry generation'})
                 return
             if job.get('status') == 'completed' and not Path(job.get('path', '')).exists():
-                save_job(job_id, {
-                    'status': 'failed',
-                    'error': 'Generated audio is no longer available; retry generation',
-                })
+                save_job(job_id, {'status': 'failed', 'error': 'Generated audio is no longer available; retry generation'})
             self._json(200, read_job(job_id))
             return
         self.send_error(404)
@@ -292,6 +309,7 @@ class Handler(BaseHTTPRequestHandler):
                     'description': body.get('description'),
                     'language': body.get('language') or 'en',
                     'reference_audio': None,
+                    'reference_rvq': None,
                     'reference_text': None,
                 }
                 write_profile(profile)
@@ -329,11 +347,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 job_id = uuid.uuid4().hex
                 save_job(job_id, {'status': 'processing'})
-                threading.Thread(
-                    target=generate_job,
-                    args=(job_id, profile, text, str(body.get('language') or profile.get('language') or 'en'), body.get('instruct')),
-                    daemon=True,
-                ).start()
+                threading.Thread(target=generate_job, args=(job_id, profile, text, str(body.get('language') or profile.get('language') or 'ur'), body.get('instruct')), daemon=True).start()
                 self._json(200, {'id': job_id, 'status': 'processing'})
                 return
             self.send_error(404)
@@ -347,12 +361,17 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path.startswith('/profiles/'):
             profile_id = self.path.split('/')[2].split('?', 1)[0]
+            if profile_id == '8fbf738572e14231b793c1d7651dc331':
+                self._json(409, {'error': 'The existing Ali cloned voice is protected and cannot be deleted'})
+                return
             profile = read_profile(profile_id)
             if not profile:
                 self._json(404, {'error': 'Profile not found'})
                 return
             if profile.get('reference_audio'):
                 Path(profile['reference_audio']).unlink(missing_ok=True)
+            if profile.get('reference_rvq'):
+                Path(profile['reference_rvq']).unlink(missing_ok=True)
             profile_path(profile_id).unlink(missing_ok=True)
             self._json(200, {'ok': True})
             return
@@ -362,6 +381,20 @@ class Handler(BaseHTTPRequestHandler):
         print('[HTTP]', fmt % args)
 
 
+def shutdown(*_args):
+    global engine_process
+    if engine_process is not None and engine_process.poll() is None:
+        engine_process.send_signal(signal.SIGTERM)
+        try:
+            engine_process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            engine_process.kill()
+
+
 if __name__ == '__main__':
-    print(f'[OmniVoice] Listening on {HOST}:{PORT}')
-    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
+    try:
+        start_engine()
+        print(f'[OmniVoice] Native service listening on {HOST}:{PORT}')
+        ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
+    finally:
+        shutdown()
