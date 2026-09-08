@@ -57,6 +57,30 @@ def read_profile(profile_id):
 
 def write_profile(profile): profile_path(profile['id']).write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding='utf-8')
 
+def sanitize_profile(profile):
+    """Strip local filesystem paths from a profile before returning it upstream."""
+    return {
+        'id': profile.get('id'),
+        'name': profile.get('name'),
+        'description': profile.get('description'),
+        'language': profile.get('language'),
+        'has_reference_audio': bool(profile.get('reference_audio')),
+        'status': 'ready' if profile.get('reference_audio') else 'pending_audio',
+    }
+
+def list_profiles():
+    """Return sanitized metadata for every profile stored on disk."""
+    profiles = []
+    for path in sorted(PROFILE_DIR.glob('*.json')):
+        try:
+            profiles.append(json.loads(path.read_text(encoding='utf-8')))
+        except Exception:
+            continue
+    return profiles
+
+def list_profile_ids():
+    return [profile.get('id') for profile in list_profiles()]
+
 
 def save_reference(file_bytes, filename, profile_id):
     if not file_bytes: raise ValueError('Empty reference audio')
@@ -129,6 +153,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/health': self._json(200, {'ok': True, 'model': MODEL_ID, 'device': DEVICE}); return
         if not self.authorized(): self._json(401, {'error': 'Unauthorized'}); return
+        if self.path.split('?', 1)[0].rstrip('/') == '/profiles':
+            self._json(200, {'profiles': [sanitize_profile(p) for p in list_profiles()]}); return
+        if self.path.startswith('/profiles/'):
+            profile_id = self.path.split('/')[2].split('?', 1)[0]
+            profile = read_profile(profile_id)
+            if not profile: self._json(404, {'error': 'Profile not found'}); return
+            self._json(200, sanitize_profile(profile)); return
         if self.path.startswith('/audio/'):
             job = jobs.get(self.path.split('/')[2].split('?', 1)[0])
             if not job or job.get('status') != 'completed': self.send_error(404); return
@@ -159,10 +190,32 @@ class Handler(BaseHTTPRequestHandler):
                 if not profile_id or not text: self._json(400, {'error': 'profile_id and text are required'}); return
                 if len(text) > MAX_TEXT_CHARS: self._json(400, {'error': 'Text is too long'}); return
                 profile = read_profile(profile_id)
-                if not profile: self._json(404, {'error': 'Profile not found'}); return
+                if not profile:
+                    available = list_profile_ids()
+                    print(f'[OmniVoice] generate requested unknown profile_id={profile_id!r}; available={available}')
+                    hint = f'Available profiles: {available}' if available else 'Available profiles: none. Create one via POST /admin/create-default'
+                    message = f'Profile not found. {hint}'
+                    self._json(404, {'error': message[:300]}); return
+                if not profile.get('reference_audio'):
+                    message = f"Reference audio missing for profile {profile_id}. Upload via POST /profiles/{profile_id}/samples"
+                    self._json(400, {'error': message[:300]}); return
                 job_id = uuid.uuid4().hex; jobs[job_id] = {'status': 'processing'}
                 threading.Thread(target=generate_job, args=(job_id, profile, text, str(body.get('language') or profile.get('language') or 'en'), body.get('instruct')), daemon=True).start()
                 self._json(200, {'id': job_id, 'status': 'processing'}); return
+            if self.path == '/admin/create-default':
+                body = self._read_json() if self.headers.get('Content-Length', '0') != '0' else {}
+                profile_id = uuid.uuid4().hex
+                profile = {
+                    'id': profile_id,
+                    'name': str(body.get('name') or f'default-{profile_id[:8]}'),
+                    'description': body.get('description'),
+                    'language': body.get('language') or 'en',
+                    'reference_audio': None,
+                    'reference_text': None,
+                }
+                write_profile(profile)
+                self._json(200, {'id': profile_id, 'status': 'pending_audio', 'message': f'Profile created. Upload reference audio via POST /profiles/{profile_id}/samples before use.'})
+                return
             self.send_error(404)
         except Exception as exc:
             traceback.print_exc(); self._json(500, {'error': str(exc)})
