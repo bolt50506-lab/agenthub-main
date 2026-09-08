@@ -74,7 +74,8 @@ RUN curl -L --fail --retry 5 --retry-delay 2 \
 COPY server.py ./
 COPY bootstrap_voice.py ./
 COPY ali_voice.enc.b64 ./
+COPY runtime_resilience.py ./
 
 EXPOSE 7860
 
-CMD ["sh", "-c", "python bootstrap_voice.py && exec python server.py"]
+CMD ["sh", "-c", "python bootstrap_voice.py && python runtime_resilience.py && exec python server.py"]
