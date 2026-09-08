@@ -4,7 +4,12 @@ import { generateAIResponseWithFallback, type ProviderConfig } from '@/lib/ai/pr
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+// OmniVoice CPU generation can legitimately take ~180s for a short cloned clip.
+// Keep this route alive long enough for the asynchronous OmniVoice job to finish.
+export const maxDuration = 300;
 const OMNIVOICE_DEFAULT_URL = 'https://agenthub-omnivoice-production.up.railway.app';
+const OMNIVOICE_POLL_TIMEOUT_MS = 285_000;
+const OMNIVOICE_POLL_INTERVAL_MS = 2_000;
 
 function isAuthorized(req: NextRequest) {
   const expected = process.env.AGENTHUB_WEBHOOK_SECRET || '';
@@ -27,19 +32,61 @@ async function prepareRomanUrduForOmniVoice(text: string, businessId: string, cu
 }
 
 async function synthesizeOmniVoice(baseUrl: string, profileId: string, text: string, language: string, instruct?: string) {
-  const headers = { 'Content-Type': 'application/json', 'x-agenthub-secret': process.env.AGENTHUB_WEBHOOK_SECRET || '' };
-  const create = await fetch(`${baseUrl}/generate`, { method: 'POST', headers, body: JSON.stringify({ profile_id: profileId, text, language, instruct }), signal: AbortSignal.timeout(120_000) }).catch(() => null);
+  const secret = process.env.AGENTHUB_WEBHOOK_SECRET || '';
+  const headers = { 'Content-Type': 'application/json', 'x-agenthub-secret': secret };
+  const create = await fetch(`${baseUrl}/generate`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ profile_id: profileId, text, language, instruct }),
+    signal: AbortSignal.timeout(20_000),
+  }).catch(() => null);
+
   if (!create) return { response: null as Response | null, error: 'OmniVoice service is unreachable' };
-  const raw = await create.text(); let generation: { id?: string; error?: string } = {};
+  const raw = await create.text();
+  let generation: { id?: string; error?: string } = {};
   try { generation = raw ? JSON.parse(raw) : {}; } catch {}
-  if (!create.ok || !generation.id) return { response: null, error: generation.error || 'OmniVoice generation failed' };
-  for (let attempt = 0; attempt < 120; attempt += 1) {
-    const audio = await fetch(`${baseUrl}/audio/${encodeURIComponent(generation.id)}`, { headers: { 'x-agenthub-secret': process.env.AGENTHUB_WEBHOOK_SECRET || '' }, signal: AbortSignal.timeout(20_000) }).catch(() => null);
-    if (audio?.ok) return { response: audio, error: null };
-    const history = await fetch(`${baseUrl}/history/${encodeURIComponent(generation.id)}`, { headers: { 'x-agenthub-secret': process.env.AGENTHUB_WEBHOOK_SECRET || '' }, signal: AbortSignal.timeout(10_000) }).catch(() => null);
-    if (history?.ok) { const status = await history.json().catch(() => null) as { status?: string; error?: string } | null; if (status?.status === 'failed') return { response: null, error: status.error || 'OmniVoice generation failed' }; }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+  if (!create.ok || !generation.id) return { response: null, error: generation.error || `OmniVoice generation failed (HTTP ${create.status})` };
+
+  const deadline = Date.now() + OMNIVOICE_POLL_TIMEOUT_MS;
+  let attempt = 0;
+  console.log(`[OmniVoice] Job ${generation.id} accepted; waiting asynchronously for completion`);
+
+  while (Date.now() < deadline) {
+    attempt += 1;
+    const audio = await fetch(`${baseUrl}/audio/${encodeURIComponent(generation.id)}`, {
+      headers: { 'x-agenthub-secret': secret },
+      signal: AbortSignal.timeout(20_000),
+    }).catch(() => null);
+
+    // OmniVoice intentionally returns 409 while the asynchronous job is still processing.
+    // It is NOT a synthesis failure. Do not hammer the endpoint or abort the job on 409.
+    if (audio?.ok) {
+      console.log(`[OmniVoice] Job ${generation.id} completed after ${attempt} polls`);
+      return { response: audio, error: null };
+    }
+
+    const history = await fetch(`${baseUrl}/history/${encodeURIComponent(generation.id)}`, {
+      headers: { 'x-agenthub-secret': secret },
+      signal: AbortSignal.timeout(10_000),
+    }).catch(() => null);
+
+    if (history?.ok) {
+      const status = await history.json().catch(() => null) as { status?: string; error?: string } | null;
+      if (status?.status === 'completed') {
+        // A completed job should normally make /audio return 200 immediately. Retry once
+        // after the state transition in case the output file is still being finalized.
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        continue;
+      }
+      if (status?.status === 'failed') {
+        return { response: null, error: status.error || 'OmniVoice generation failed' };
+      }
+    }
+
+    const waitMs = audio?.status === 409 ? OMNIVOICE_POLL_INTERVAL_MS : 3_000;
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
   }
+
   return { response: null, error: 'OmniVoice generation timed out waiting for audio' };
 }
 
@@ -52,8 +99,7 @@ export async function POST(req: NextRequest) {
   const supabase = createServiceClient();
   const { data: session } = await supabase.from('whatsapp_sessions').select('business_id').eq('session_id', sessionId).maybeSingle();
   if (!session?.business_id) return NextResponse.json({ error: 'WhatsApp session not found' }, { status: 404 });
-  // Only OmniVoice profiles are eligible for cloned WhatsApp voice replies.
-  // This prevents an older Voicebox profile marked as default from taking over.
+
   const { data: voice } = await supabase.from('voice_profiles').select('id, provider, provider_voice_id, language').eq('business_id', session.business_id).eq('provider', 'omnivoice').eq('is_default', true).eq('status', 'active').maybeSingle();
   if (!voice) return NextResponse.json({ error: 'No active OmniVoice clone configured' }, { status: 404 });
 
