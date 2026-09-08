@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
   const wantsUrdu = looksLikeUrdu(text) || looksLikeUrdu(customerMessage);
   const ttsText = wantsUrdu ? await prepareRomanUrduForOmniVoice(text, session.business_id, customerMessage) : text;
   const ttsLanguage = wantsUrdu ? 'ur' : (voice.language || body?.language || 'en').toLowerCase();
-  const generated = await synthesizeOmniVoice(baseUrl, voice.provider_voice_id, ttsText, ttsLanguage, wantsUrdu ? 'natural conversational Pakistani Urdu delivery; warm human pacing; preserve the speaker identity' : undefined);
+  const generated = await synthesizeOmniVoice(baseUrl, voice.provider_voice_id, ttsText, ttsLanguage, undefined);
   if (!generated.response) return NextResponse.json({ error: generated.error || 'OmniVoice synthesis failed' }, { status: 502 });
   const audio = await generated.response.arrayBuffer();
   if (!audio.byteLength) return NextResponse.json({ error: 'OmniVoice returned empty audio' }, { status: 502 });
