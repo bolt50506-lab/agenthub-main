@@ -143,7 +143,11 @@ class Handler(BaseHTTPRequestHandler):
         if not self.authorized(): self._json(401, {'error': 'Unauthorized'}); return
         try:
             if self.path == '/profiles':
-                body = self._read_json(); profile_id = uuid.uuid4().hex
+                body = self._read_json()
+                requested_id = str(body.get('id') or '').strip()
+                profile_id = requested_id or uuid.uuid4().hex
+                if len(profile_id) > 128 or '/' in profile_id or '\\' in profile_id or profile_id in {'.', '..'}:
+                    self._json(400, {'error': 'Invalid profile id'}); return
                 profile = {'id': profile_id, 'name': str(body.get('name') or profile_id), 'description': body.get('description'), 'language': body.get('language') or 'en', 'reference_audio': None, 'reference_text': None}
                 write_profile(profile); self._json(200, profile); return
             if self.path.startswith('/profiles/') and self.path.endswith('/samples'):
