@@ -18,8 +18,8 @@ RUN python3 /src/patch_tts_server.py \
        -DCMAKE_BUILD_TYPE=Release \
     && cmake --build /src/omnivoice.cpp/build --config Release -j2 \
     && mkdir -p /runtime-libs \
-    && find /src/omnivoice.cpp/build -type f -name 'lib*.so*' -exec cp -a {} /runtime-libs/ \; \
-    && find /src/omnivoice.cpp/build -type l -name 'lib*.so*' -exec cp -a {} /runtime-libs/ \; \
+    && find /src/omnivoice.cpp/build -type f -name 'lib*.so*' -exec cp -a {} /runtime-libs/ \\; \
+    && find /src/omnivoice.cpp/build -type l -name 'lib*.so*' -exec cp -a {} /runtime-libs/ \\; \
     && test -n "$(find /runtime-libs -name 'libggml.so*' -print -quit)"
 
 FROM python:3.11-slim-bookworm
@@ -31,7 +31,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     MKL_NUM_THREADS=1 \
     GGML_N_THREADS=2 \
     OMNIVOICE_CPU_THREADS=2 \
-    OMNIVOICE_NUM_STEPS=16 \
+    OMNIVOICE_NUM_STEPS=8 \
     OMNIVOICE_GGUF_MODEL=/opt/omnivoice/models/omnivoice-base-Q4_K_M.gguf \
     OMNIVOICE_GGUF_CODEC=/opt/omnivoice/models/omnivoice-tokenizer-Q4_K_M.gguf \
     OMNIVOICE_ENGINE_BIN=/opt/omnivoice/bin/tts-server \
