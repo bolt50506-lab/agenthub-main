@@ -38,6 +38,7 @@ ENGINE_BIN = os.environ.get('OMNIVOICE_ENGINE_BIN', '/opt/omnivoice/bin/tts-serv
 MODEL_PATH = os.environ.get('OMNIVOICE_GGUF_MODEL', str(MODEL_DIR / 'omnivoice-base-Q4_K_M.gguf'))
 CODEC_PATH = os.environ.get('OMNIVOICE_GGUF_CODEC', str(MODEL_DIR / 'omnivoice-tokenizer-Q4_K_M.gguf'))
 VOICE_NAME = 'ali'
+NUM_STEPS = max(4, min(32, int(os.environ.get('OMNIVOICE_NUM_STEPS', '16'))))
 
 jobs = {}
 engine_process = None
@@ -128,7 +129,8 @@ def start_engine():
     env.setdefault('OMP_NUM_THREADS', '1')
     env.setdefault('OPENBLAS_NUM_THREADS', '1')
     env.setdefault('MKL_NUM_THREADS', '1')
-    print(f'[OmniVoice] Starting native CPU engine model={MODEL_PATH} codec={CODEC_PATH}')
+    env.setdefault('GGML_N_THREADS', os.environ.get('GGML_N_THREADS', '2'))
+    print(f'[OmniVoice] Starting native CPU engine model={MODEL_PATH} codec={CODEC_PATH} steps={NUM_STEPS} ggml_threads={env.get("GGML_N_THREADS")}')
     engine_process = subprocess.Popen([
         ENGINE_BIN,
         '--model', MODEL_PATH,
@@ -150,22 +152,26 @@ def language_value(language):
 def generate_job(job_id, profile, text, language, instruct=None):
     try:
         with generation_lock:
+            save_job(job_id, {'status': 'processing', 'started_at': time.time()})
             payload = {
                 'input': text,
                 'voice': VOICE_NAME,
                 'language': language_value(language),
                 'response_format': 'wav',
                 'seed': -1,
+                'num_step': NUM_STEPS,
             }
             if instruct:
                 payload['instructions'] = str(instruct)
-            status, data, _ = http_json(f'{ENGINE_URL}/v1/audio/speech', payload, timeout=300)
+            status, data, _ = http_json(f'{ENGINE_URL}/v1/audio/speech', payload, timeout=900)
             if status != 200 or not data:
                 raise RuntimeError(f'Native OmniVoice synthesis failed: HTTP {status}: {data[:1000].decode("utf-8", "replace")}')
             output = OUTPUT_DIR / f'{job_id}.wav'
-            output.write_bytes(data)
-            save_job(job_id, {'status': 'completed', 'path': str(output)})
-            print(f'[OmniVoice] Generated {job_id} ({len(data)} bytes)')
+            tmp = output.with_suffix('.tmp.wav')
+            tmp.write_bytes(data)
+            tmp.replace(output)
+            save_job(job_id, {'status': 'completed', 'path': str(output), 'completed_at': time.time()})
+            print(f'[OmniVoice] Generated {job_id} ({len(data)} bytes) in {time.time() - float(read_job(job_id).get("started_at", time.time())):.1f}s')
     except Exception as exc:
         traceback.print_exc()
         save_job(job_id, {'status': 'failed', 'error': str(exc)})
@@ -249,7 +255,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/health':
             engine_ok = engine_process is not None and engine_process.poll() is None
-            self._json(200 if engine_ok else 503, {'ok': engine_ok, 'engine': 'omnivoice.cpp', 'voice': VOICE_NAME})
+            self._json(200 if engine_ok else 503, {'ok': engine_ok, 'engine': 'omnivoice.cpp', 'voice': VOICE_NAME, 'num_steps': NUM_STEPS})
             return
         if not self.authorized():
             self._json(401, {'error': 'Unauthorized'})
@@ -264,7 +270,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(409, {'error': job.get('error', 'Voice generation failed'), 'status': 'failed'})
                 return
             if job.get('status') != 'completed':
-                self._json(409, {'error': 'Audio is not ready', 'status': job.get('status', 'pending')})
+                self._json(409, {'error': 'Audio is not ready', 'status': job.get('status', 'processing')})
                 return
             path = Path(job['path'])
             if not path.exists():
@@ -346,9 +352,9 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(404, {'error': 'Profile not found'})
                     return
                 job_id = uuid.uuid4().hex
-                save_job(job_id, {'status': 'processing'})
+                save_job(job_id, {'status': 'processing', 'created_at': time.time()})
                 threading.Thread(target=generate_job, args=(job_id, profile, text, str(body.get('language') or profile.get('language') or 'ur'), body.get('instruct')), daemon=True).start()
-                self._json(200, {'id': job_id, 'status': 'processing'})
+                self._json(200, {'id': job_id, 'status': 'processing', 'num_steps': NUM_STEPS})
                 return
             self.send_error(404)
         except Exception as exc:
@@ -391,10 +397,14 @@ def shutdown(*_args):
             engine_process.kill()
 
 
+signal.signal(signal.SIGTERM, shutdown)
+signal.signal(signal.SIGINT, shutdown)
+
 if __name__ == '__main__':
     try:
         start_engine()
         print(f'[OmniVoice] Native service listening on {HOST}:{PORT}')
         ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
-    finally:
-        shutdown()
+    except Exception:
+        traceback.print_exc()
+        raise
