@@ -18,8 +18,8 @@ RUN python3 /src/patch_tts_server.py \
        -DCMAKE_BUILD_TYPE=Release \
     && cmake --build /src/omnivoice.cpp/build --config Release -j2 \
     && mkdir -p /runtime-libs \
-    && find /src/omnivoice.cpp/build -type f -name 'lib*.so*' -exec cp -a {} /runtime-libs/ \\; \
-    && find /src/omnivoice.cpp/build -type l -name 'lib*.so*' -exec cp -a {} /runtime-libs/ \\; \
+    && find /src/omnivoice.cpp/build -type f -name 'lib*.so*' -exec cp -a {} /runtime-libs/ \; \
+    && find /src/omnivoice.cpp/build -type l -name 'lib*.so*' -exec cp -a {} /runtime-libs/ \; \
     && test -n "$(find /runtime-libs -name 'libggml.so*' -print -quit)"
 
 FROM python:3.11-slim-bookworm
