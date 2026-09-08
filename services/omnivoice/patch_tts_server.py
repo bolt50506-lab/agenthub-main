@@ -33,6 +33,32 @@ if 'req.num_step' not in s:
 
 h.write_text(s)
 
+# The upstream backend deliberately uses logical/2 physical-core threads.
+# Railway exposes many vCPUs, but this service is memory/CPU constrained. Honor
+# OMNIVOICE_CPU_THREADS so the deployment can cap the native GGML backend.
+b = Path('/src/omnivoice.cpp/src/backend.h')
+s = b.read_text()
+old = '''static int backend_cpu_n_threads(void) {
+    int n = (int) std::thread::hardware_concurrency() / 2;
+    return n > 0 ? n : 1;
+}'''
+new = '''static int backend_cpu_n_threads(void) {
+    const char * configured = std::getenv("OMNIVOICE_CPU_THREADS");
+    if (configured && *configured) {
+        char * end = nullptr;
+        long n = std::strtol(configured, &end, 10);
+        if (end != configured && *end == '\\0' && n > 0 && n <= 64) {
+            return (int) n;
+        }
+    }
+    int n = (int) std::thread::hardware_concurrency() / 2;
+    return n > 0 ? n : 1;
+}'''
+if old not in s:
+    raise SystemExit('backend_cpu_n_threads block not found')
+s = s.replace(old, new, 1)
+b.write_text(s)
+
 cpp = Path('/src/omnivoice.cpp/tools/tts-server.cpp')
 s = cpp.read_text()
 
@@ -46,4 +72,4 @@ if 'p.mg_num_step = 16;' not in s:
     s = s.replace(needle, needle + '\n        p.mg_num_step = 16;', 1)
 
 cpp.write_text(s)
-print('OmniVoice tts-server patch applied: native MaskGIT forced to 16 steps')
+print('OmniVoice patch applied: native MaskGIT forced to 16 steps and CPU threads configurable')
