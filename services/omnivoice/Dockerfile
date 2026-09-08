@@ -14,7 +14,11 @@ RUN git clone --recurse-submodules --depth 1 https://github.com/ServeurpersoCom/
        -DGGML_BLAS=ON \
        -DOMNIVOICE_SHARED=OFF \
        -DCMAKE_BUILD_TYPE=Release \
-    && cmake --build /src/omnivoice.cpp/build --config Release -j2
+    && cmake --build /src/omnivoice.cpp/build --config Release -j2 \
+    && mkdir -p /runtime-libs \
+    && find /src/omnivoice.cpp/build -type f -name 'lib*.so*' -exec cp -a {} /runtime-libs/ \; \
+    && find /src/omnivoice.cpp/build -type l -name 'lib*.so*' -exec cp -a {} /runtime-libs/ \; \
+    && test -n "$(find /runtime-libs -name 'libggml.so*' -print -quit)"
 
 FROM python:3.11-slim-bookworm
 
@@ -45,14 +49,12 @@ RUN pip install --no-cache-dir --upgrade pip \
 RUN mkdir -p /opt/omnivoice/bin /opt/omnivoice/lib /opt/omnivoice/models /data/omnivoice /data/huggingface
 COPY --from=builder /src/omnivoice.cpp/build/tts-server /opt/omnivoice/bin/tts-server
 COPY --from=builder /src/omnivoice.cpp/build/omnivoice-codec /opt/omnivoice/bin/omnivoice-codec
+COPY --from=builder /runtime-libs/ /opt/omnivoice/lib/
 
-# The native binaries link against GGML shared libraries produced by the build.
-# Copy those runtime libraries into a stable location and register them with the linker.
-RUN find /src/omnivoice.cpp/build -type f -o -type l 2>/dev/null \
-    | grep -E '/lib[^/]*\\.so($|\\.)' \
-    | while read -r lib; do cp -a "$lib" /opt/omnivoice/lib/; done \
-    && ldconfig /opt/omnivoice/lib \
-    && test -f /opt/omnivoice/lib/libggml.so.0
+RUN ldconfig /opt/omnivoice/lib \
+    && test -n "$(find /opt/omnivoice/lib -name 'libggml.so*' -print -quit)" \
+    && ldd /opt/omnivoice/bin/omnivoice-codec \
+    && ldd /opt/omnivoice/bin/tts-server
 
 # Q4_K_M keeps the native OmniVoice runtime within the existing ~1 GB Railway memory budget.
 RUN curl -L --fail --retry 5 --retry-delay 2 \
