@@ -6,7 +6,8 @@ from pathlib import Path
 
 PROFILE_ID = "8fbf738572e14231b793c1d7651dc331"
 BASE_DIR = Path(__file__).resolve().parent
-PROFILE_DIR = BASE_DIR / "profiles"
+DATA_DIR = Path('/data/omnivoice') if Path('/data').exists() else BASE_DIR
+PROFILE_DIR = DATA_DIR / "profiles"
 PROFILE_DIR.mkdir(parents=True, exist_ok=True)
 PROFILE_PATH = PROFILE_DIR / f"{PROFILE_ID}.json"
 REFERENCE_PATH = PROFILE_DIR / f"{PROFILE_ID}_reference.mp3"
@@ -19,7 +20,7 @@ if not KEY:
 needs_restore = not PROFILE_PATH.exists() or not REFERENCE_PATH.exists() or REFERENCE_PATH.stat().st_size < 1000
 if needs_restore:
     encoded = ENC_PATH.read_text(encoding="utf-8").strip()
-    encrypted_path = BASE_DIR / ".ali_voice.enc"
+    encrypted_path = DATA_DIR / ".ali_voice.enc"
     encrypted_path.write_bytes(base64.b64decode(encoded))
     try:
         subprocess.run([
