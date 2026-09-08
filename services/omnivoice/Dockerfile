@@ -28,7 +28,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     OMNIVOICE_ENGINE_BIN=/opt/omnivoice/bin/tts-server \
     OMNIVOICE_CODEC_BIN=/opt/omnivoice/bin/omnivoice-codec \
     OMNIVOICE_BOOTSTRAP_ASR_MODEL=tiny \
-    HF_HOME=/data/huggingface
+    HF_HOME=/data/huggingface \
+    LD_LIBRARY_PATH=/opt/omnivoice/lib:/usr/local/lib:/usr/lib/x86_64-linux-gnu
 
 WORKDIR /app
 
@@ -41,9 +42,17 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
-RUN mkdir -p /opt/omnivoice/bin /opt/omnivoice/models /data/omnivoice /data/huggingface
+RUN mkdir -p /opt/omnivoice/bin /opt/omnivoice/lib /opt/omnivoice/models /data/omnivoice /data/huggingface
 COPY --from=builder /src/omnivoice.cpp/build/tts-server /opt/omnivoice/bin/tts-server
 COPY --from=builder /src/omnivoice.cpp/build/omnivoice-codec /opt/omnivoice/bin/omnivoice-codec
+
+# The native binaries link against GGML shared libraries produced by the build.
+# Copy those runtime libraries into a stable location and register them with the linker.
+RUN find /src/omnivoice.cpp/build -type f -o -type l 2>/dev/null \
+    | grep -E '/lib[^/]*\\.so($|\\.)' \
+    | while read -r lib; do cp -a "$lib" /opt/omnivoice/lib/; done \
+    && ldconfig /opt/omnivoice/lib \
+    && test -f /opt/omnivoice/lib/libggml.so.0
 
 # Q4_K_M keeps the native OmniVoice runtime within the existing ~1 GB Railway memory budget.
 RUN curl -L --fail --retry 5 --retry-delay 2 \
