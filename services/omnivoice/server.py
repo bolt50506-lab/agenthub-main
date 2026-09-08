@@ -58,6 +58,26 @@ def read_profile(profile_id):
 def write_profile(profile): profile_path(profile['id']).write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding='utf-8')
 
 
+DEFAULT_PROFILE_ID = '60d2c1900d0e4d1198d06115d9fc4093'
+
+
+def ensure_default_profile():
+    print('[OmniVoice] Ensuring default profile exists...')
+    try:
+        if not profile_path(DEFAULT_PROFILE_ID).exists():
+            profile = {
+                'id': DEFAULT_PROFILE_ID,
+                'name': 'Default Urdu Voice',
+                'description': 'Default profile for Urdu voice synthesis',
+                'language': 'ur',
+                'reference_audio': None,
+                'reference_text': None,
+            }
+            write_profile(profile)
+    except Exception as exc:
+        print(f'[OmniVoice] Failed to ensure default profile: {exc}')
+
+
 def save_reference(file_bytes, filename, profile_id):
     if not file_bytes: raise ValueError('Empty reference audio')
     if len(file_bytes) > 25 * 1024 * 1024: raise ValueError('Reference audio is larger than 25 MB')
@@ -180,5 +200,6 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == '__main__':
+    ensure_default_profile()
     print(f'[OmniVoice] Listening on {HOST}:{PORT}')
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
