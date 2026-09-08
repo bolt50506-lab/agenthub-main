@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg libsndfile1 git \
+    && apt-get install -y --no-install-recommends ffmpeg libsndfile1 git openssl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
@@ -16,8 +16,10 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
 COPY server.py ./
+COPY bootstrap_voice.py ./
+COPY ali_voice.enc.b64 ./
 RUN mkdir -p /app/profiles /app/outputs /data/huggingface
 
 EXPOSE 7860
 
-CMD ["python", "server.py"]
+CMD ["sh", "-c", "python bootstrap_voice.py && python server.py"]
