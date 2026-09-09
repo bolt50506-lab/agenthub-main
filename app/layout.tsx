@@ -11,6 +11,11 @@ const inter = Inter({ subsets: ['latin'] });
 export const metadata: Metadata = {
   title: 'AgentHub — Turn Conversations Into Business Actions',
   description: 'AI Business Agent Platform for connecting communication channels and deploying AI agents that capture leads, book appointments, and drive business actions.',
+  icons: {
+    icon: '/agenthub-logo.svg',
+    shortcut: '/agenthub-logo.svg',
+    apple: '/agenthub-logo.svg',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
