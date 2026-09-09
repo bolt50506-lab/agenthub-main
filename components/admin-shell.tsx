@@ -10,7 +10,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { Sheet, SheetContent } from '@/components/ui/sheet';
 import {
   Shield, LayoutDashboard, Building, Users, Bot, Plug, BarChart3,
   FileText, Settings, Menu, LogOut, ChevronLeft, Moon, Sun, Bell, Mic2, FileSignature, CreditCard,
@@ -64,9 +64,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const SidebarContent = () => (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 px-4 h-16 border-b border-border">
-        <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-          <Shield className="w-5 h-5 text-primary-foreground" />
-        </div>
+        <img src="/agenthub-logo.svg" alt="AgentHub" className="w-9 h-9 rounded-xl object-cover shadow-sm" />
         <div className="flex flex-col">
           <span className="text-sm font-bold tracking-tight">AgentHub</span>
           <span className="text-xs text-muted-foreground">Super Admin</span>
