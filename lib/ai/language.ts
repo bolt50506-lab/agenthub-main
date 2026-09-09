@@ -28,6 +28,7 @@ function words(text: string) {
 export function detectReplyLanguage(text: string): ReplyLanguage {
   const value = text.trim();
   if (!value) return 'english';
+  if (/\u0900-\u097F/.test(value)) return 'roman_urdu';
   if (/[\u0600-\u06FF]/.test(value)) return 'urdu';
 
   const tokens = words(value);
@@ -55,22 +56,22 @@ export function buildLanguageInstruction(text: string): string {
     const voiceRule = voiceQuestion
       ? ' The customer is asking about voice capability. VOICE CAPABILITY IS AVAILABLE. Never say, imply, or apologize that voice support/voice replies are unavailable or unsupported. Answer the capability question truthfully: voice replies are supported when the configured delivery mode permits them.'
       : '';
-    return 'ABSOLUTE OUTPUT LANGUAGE RULE: Reply ONLY in natural Roman Urdu written with Latin letters. Never answer in English-only. Never use Urdu/Arabic script. English technical terms, brand names, product names, abbreviations, numbers and currency may remain unchanged, but every normal sentence around them must be Roman Urdu. The dashboard/default language setting is ignored for this message. Before returning, check: if the reply could pass as an English sentence, rewrite it into Roman Urdu. Return ONLY the customer-facing reply.' + voiceRule;
+    return 'ABSOLUTE OUTPUT LANGUAGE RULE — HIGHEST PRIORITY: Reply ONLY in natural Roman Urdu using Latin letters. NEVER reply in Hindi. NEVER use Devanagari characters (\u0900-\u097F). NEVER translate Roman Urdu into Hindi. NEVER switch Roman Urdu to English-only. Do not use Urdu/Arabic script. English technical terms, brand names, product names, abbreviations, numbers and currency may remain unchanged, but every normal sentence around them must be Roman Urdu. The dashboard/default language setting MUST NOT override this customer-language rule. Before returning, check every sentence: it must be Roman Urdu, not Hindi and not English-only. Return ONLY the customer-facing reply.' + voiceRule;
   }
   if (language === 'urdu') {
     const voiceRule = voiceQuestion
       ? ' The customer is asking about voice capability. VOICE CAPABILITY IS AVAILABLE. Never say, imply, or apologize that voice support/voice replies are unavailable or unsupported. Answer the capability question truthfully: voice replies are supported when the configured delivery mode permits them.'
       : '';
-    return 'ABSOLUTE OUTPUT LANGUAGE RULE: Reply in Urdu script. Do not switch to English unless required for a product name, abbreviation, number or technical term. Return ONLY the customer-facing reply.' + voiceRule;
+    return 'ABSOLUTE OUTPUT LANGUAGE RULE: Reply in Urdu script. NEVER use Hindi or Devanagari characters. Do not switch to English unless required for a product name, abbreviation, number or technical term. Return ONLY the customer-facing reply.' + voiceRule;
   }
   if (language === 'mixed') {
     const voiceRule = voiceQuestion
       ? ' The customer is asking about voice capability. VOICE CAPABILITY IS AVAILABLE. Never say, imply, or apologize that voice support/voice replies are unavailable or unsupported. Answer the capability question truthfully: voice replies are supported when the configured delivery mode permits them.'
       : '';
-    return 'ABSOLUTE OUTPUT LANGUAGE RULE: Preserve the customer\'s natural English + Roman Urdu mixture. Do not convert their Roman Urdu into English-only and do not use Urdu/Arabic script unless the customer used it. Return ONLY the customer-facing reply.' + voiceRule;
+    return 'ABSOLUTE OUTPUT LANGUAGE RULE — HIGHEST PRIORITY: Preserve the customer\'s natural English + Roman Urdu mixture. NEVER reply in Hindi. NEVER use Devanagari characters (\u0900-\u097F). Do not convert Roman Urdu into Hindi or English-only. Do not use Urdu/Arabic script unless the customer used it. Return ONLY the customer-facing reply.' + voiceRule;
   }
   if (voiceQuestion) {
-    return 'ABSOLUTE OUTPUT LANGUAGE RULE: Reply in English. Do not switch to Urdu or Roman Urdu unless the customer does. VOICE CAPABILITY IS AVAILABLE. Never say, imply, or apologize that voice support/voice replies are unavailable or unsupported. Answer the capability question truthfully: voice replies are supported when the configured delivery mode permits them. Return ONLY the customer-facing reply.';
+    return 'ABSOLUTE OUTPUT LANGUAGE RULE: Reply in English. Do not switch to Hindi, Urdu, Roman Urdu or Devanagari unless the customer does. NEVER use Devanagari characters. VOICE CAPABILITY IS AVAILABLE. Never say, imply, or apologize that voice support/voice replies are unavailable or unsupported. Answer the capability question truthfully: voice replies are supported when the configured delivery mode permits them. Return ONLY the customer-facing reply.';
   }
-  return 'ABSOLUTE OUTPUT LANGUAGE RULE: Reply in English. Do not switch to Urdu or Roman Urdu unless the customer does. Return ONLY the customer-facing reply.';
+  return 'ABSOLUTE OUTPUT LANGUAGE RULE: Reply in English. Do not switch to Hindi, Urdu, Roman Urdu or Devanagari unless the customer does. NEVER use Devanagari characters. Return ONLY the customer-facing reply.';
 }
