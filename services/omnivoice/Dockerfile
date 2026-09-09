@@ -74,10 +74,6 @@ RUN curl -L --fail --retry 5 --retry-delay 2 \
     && test $(stat -c%s /opt/omnivoice/models/omnivoice-tokenizer-Q4_K_M.gguf) -gt 180000000
 
 COPY server.py ./
-COPY memory_safety_build_patch.py ./
-# Apply source changes once while building the image; never mutate server.py at boot.
-RUN python memory_safety_build_patch.py
-
 COPY bootstrap_voice.py ./
 COPY ali_voice.enc.b64 ./
 
