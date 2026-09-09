@@ -32,6 +32,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     GGML_N_THREADS=2 \
     OMNIVOICE_CPU_THREADS=2 \
     OMNIVOICE_NUM_STEPS=8 \
+    OMNIVOICE_MEMORY_GUARD_MB=850 \
+    OMNIVOICE_ENGINE_TIMEOUT=900 \
     OMNIVOICE_GGUF_MODEL=/opt/omnivoice/models/omnivoice-base-Q4_K_M.gguf \
     OMNIVOICE_GGUF_CODEC=/opt/omnivoice/models/omnivoice-tokenizer-Q4_K_M.gguf \
     OMNIVOICE_ENGINE_BIN=/opt/omnivoice/bin/tts-server \
@@ -72,10 +74,13 @@ RUN curl -L --fail --retry 5 --retry-delay 2 \
     && test $(stat -c%s /opt/omnivoice/models/omnivoice-tokenizer-Q4_K_M.gguf) -gt 180000000
 
 COPY server.py ./
+COPY memory_safety_build_patch.py ./
+# Apply source changes once while building the image; never mutate server.py at boot.
+RUN python memory_safety_build_patch.py
+
 COPY bootstrap_voice.py ./
 COPY ali_voice.enc.b64 ./
-COPY runtime_resilience.py ./
 
 EXPOSE 7860
 
-CMD ["sh", "-c", "python bootstrap_voice.py && python runtime_resilience.py && exec python server.py"]
+CMD ["python", "bootstrap_voice.py"]
