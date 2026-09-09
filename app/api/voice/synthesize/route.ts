@@ -4,12 +4,11 @@ import { generateAIResponseWithFallback, type ProviderConfig } from '@/lib/ai/pr
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-// OmniVoice CPU generation can legitimately take ~180s for a short cloned clip.
-// Keep this route alive long enough for the asynchronous OmniVoice job to finish.
 export const maxDuration = 300;
 const OMNIVOICE_DEFAULT_URL = 'https://agenthub-omnivoice-production.up.railway.app';
 const OMNIVOICE_POLL_TIMEOUT_MS = 285_000;
 const OMNIVOICE_POLL_INTERVAL_MS = 2_000;
+const MAX_SPEECH_CHARS = 1600;
 
 function isAuthorized(req: NextRequest) {
   const expected = process.env.AGENTHUB_WEBHOOK_SECRET || '';
@@ -20,6 +19,27 @@ function isAuthorized(req: NextRequest) {
 
 function looksLikeUrdu(text: string) {
   return /[\u0600-\u06ff]/.test(text) || /\b(urdu|roman urdu|pakistani urdu|mujhe|mujhy|aap|apko|mein|main|hai|hain|karna|karen|bata|bataye|samjha|samjhaein|chahiye|nahi|nahin|kyun|kaise|kitna|meri|mera|mere|aapka|aapki|aapke|baad|kal|abhi|theek|acha|bhai|ji)\b/i.test(text);
+}
+
+function cleanSpeechText(text: string) {
+  let value = String(text || '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/www\.\S+/gi, ' ')
+    .replace(/[*_`#>]/g, ' ')
+    .replace(/[•▪◦]/g, ', ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (value.length <= MAX_SPEECH_CHARS) return value;
+  const cut = value.slice(0, MAX_SPEECH_CHARS);
+  const sentenceEnd = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('۔ '), cut.lastIndexOf('? '), cut.lastIndexOf('! '));
+  if (sentenceEnd >= Math.floor(MAX_SPEECH_CHARS * 0.65)) return cut.slice(0, sentenceEnd + 1).trim();
+  return cut.replace(/[,;:\-–—\s]+[^\s]*$/, '').trim();
+}
+
+function voiceInstruction(language: string) {
+  if (language === 'ur') return 'Speak natural Pakistani Urdu with clear articulation, moderate pace, short natural pauses, and a calm conversational tone. Prioritize intelligibility; do not rush or slur words.';
+  return 'Speak clearly and naturally with precise articulation, a moderate conversational pace, short natural pauses, and no rushed or slurred words. Prioritize intelligibility.';
 }
 
 async function prepareRomanUrduForOmniVoice(text: string, businessId: string, customerMessage = '') {
@@ -37,10 +57,9 @@ async function synthesizeOmniVoice(baseUrl: string, profileId: string, text: str
   const create = await fetch(`${baseUrl}/generate`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ profile_id: profileId, text, language, instruct }),
+    body: JSON.stringify({ profile_id: profileId, text, language, ...(instruct ? { instruct } : {}) }),
     signal: AbortSignal.timeout(20_000),
   }).catch(() => null);
-
   if (!create) return { response: null as Response | null, error: 'OmniVoice service is unreachable' };
   const raw = await create.text();
   let generation: { id?: string; error?: string } = {};
@@ -50,43 +69,25 @@ async function synthesizeOmniVoice(baseUrl: string, profileId: string, text: str
   const deadline = Date.now() + OMNIVOICE_POLL_TIMEOUT_MS;
   let attempt = 0;
   console.log(`[OmniVoice] Job ${generation.id} accepted; waiting asynchronously for completion`);
-
   while (Date.now() < deadline) {
     attempt += 1;
     const audio = await fetch(`${baseUrl}/audio/${encodeURIComponent(generation.id)}`, {
-      headers: { 'x-agenthub-secret': secret },
-      signal: AbortSignal.timeout(20_000),
+      headers: { 'x-agenthub-secret': secret }, signal: AbortSignal.timeout(20_000),
     }).catch(() => null);
-
-    // OmniVoice intentionally returns 409 while the asynchronous job is still processing.
-    // It is NOT a synthesis failure. Do not hammer the endpoint or abort the job on 409.
     if (audio?.ok) {
       console.log(`[OmniVoice] Job ${generation.id} completed after ${attempt} polls`);
       return { response: audio, error: null };
     }
-
     const history = await fetch(`${baseUrl}/history/${encodeURIComponent(generation.id)}`, {
-      headers: { 'x-agenthub-secret': secret },
-      signal: AbortSignal.timeout(10_000),
+      headers: { 'x-agenthub-secret': secret }, signal: AbortSignal.timeout(10_000),
     }).catch(() => null);
-
     if (history?.ok) {
       const status = await history.json().catch(() => null) as { status?: string; error?: string } | null;
-      if (status?.status === 'completed') {
-        // A completed job should normally make /audio return 200 immediately. Retry once
-        // after the state transition in case the output file is still being finalized.
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        continue;
-      }
-      if (status?.status === 'failed') {
-        return { response: null, error: status.error || 'OmniVoice generation failed' };
-      }
+      if (status?.status === 'completed') { await new Promise((resolve) => setTimeout(resolve, 500)); continue; }
+      if (status?.status === 'failed') return { response: null, error: status.error || 'OmniVoice generation failed' };
     }
-
-    const waitMs = audio?.status === 409 ? OMNIVOICE_POLL_INTERVAL_MS : 3_000;
-    await new Promise((resolve) => setTimeout(resolve, waitMs));
+    await new Promise((resolve) => setTimeout(resolve, audio?.status === 409 ? OMNIVOICE_POLL_INTERVAL_MS : 3_000));
   }
-
   return { response: null, error: 'OmniVoice generation timed out waiting for audio' };
 }
 
@@ -105,9 +106,11 @@ export async function POST(req: NextRequest) {
 
   const baseUrl = (process.env.OMNIVOICE_SERVICE_URL || OMNIVOICE_DEFAULT_URL).replace(/\/$/, '');
   const wantsUrdu = looksLikeUrdu(text) || looksLikeUrdu(customerMessage);
-  const ttsText = wantsUrdu ? await prepareRomanUrduForOmniVoice(text, session.business_id, customerMessage) : text;
+  const preparedText = wantsUrdu ? await prepareRomanUrduForOmniVoice(text, session.business_id, customerMessage) : text;
+  const ttsText = cleanSpeechText(preparedText);
+  if (!ttsText) return NextResponse.json({ error: 'Voice text became empty after speech cleanup' }, { status: 400 });
   const ttsLanguage = wantsUrdu ? 'ur' : (voice.language || body?.language || 'en').toLowerCase();
-  const generated = await synthesizeOmniVoice(baseUrl, voice.provider_voice_id, ttsText, ttsLanguage, undefined);
+  const generated = await synthesizeOmniVoice(baseUrl, voice.provider_voice_id, ttsText, ttsLanguage, voiceInstruction(ttsLanguage));
   if (!generated.response) return NextResponse.json({ error: generated.error || 'OmniVoice synthesis failed' }, { status: 502 });
   const audio = await generated.response.arrayBuffer();
   if (!audio.byteLength) return NextResponse.json({ error: 'OmniVoice returned empty audio' }, { status: 502 });
