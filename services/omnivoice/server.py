@@ -50,7 +50,7 @@ NUM_STEPS = max(4, min(32, int(os.environ.get('OMNIVOICE_NUM_STEPS', '16'))))
 
 jobs = {}
 engine_process = None
-engine_lock = threading.Lock()
+engine_lock = threading.RLock()
 generation_lock = threading.Lock()
 
 
@@ -409,7 +409,6 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
         del data
-        cleanup_memory('http_json_response')
 
     def _read_json(self):
         length = int(self.headers.get('Content-Length', '0'))
