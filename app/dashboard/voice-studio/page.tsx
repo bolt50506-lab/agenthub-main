@@ -36,7 +36,7 @@ export default function VoiceStudioPage() {
   const [consent, setConsent] = useState(false);
   const [removeNoise, setRemoveNoise] = useState(false);
   const canManage = activeMembership?.role === 'owner' || activeMembership?.role === 'admin';
-  const authHeaders = async () => { const { data: { session } } = await supabase.auth.getSession(); return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}; };
+  const authHeaders = async (): Promise<Record<string, string>> => { const { data: { session } } = await supabase.auth.getSession(); return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}; };
 
   const load = async () => {
     if (!activeBusiness) return;
