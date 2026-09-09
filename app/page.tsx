@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -87,7 +86,7 @@ export default function Home() {
       <nav className="sticky top-0 z-50 border-b border-white/10 bg-[#070b18]/85 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
           <Link href="/" className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 shadow-lg shadow-violet-500/30"><Bot className="h-5 w-5" /></div>
+            <img src="/agenthub-logo.svg" alt="AgentHub" className="h-10 w-10 rounded-xl object-cover shadow-lg shadow-violet-500/20" />
             <span className="text-lg font-bold tracking-tight">AgentHub AI</span>
           </Link>
           <div className="hidden items-center gap-7 text-sm text-slate-300 lg:flex">
@@ -113,7 +112,7 @@ export default function Home() {
             <div className="absolute -inset-7 rounded-[42px] bg-gradient-to-br from-violet-600/25 via-indigo-500/10 to-cyan-500/15 blur-3xl" />
             <div className="relative overflow-hidden rounded-[28px] border border-white/10 bg-[#0c1226] p-3 shadow-2xl shadow-black/50">
               <div className="overflow-hidden rounded-[20px] border border-white/10 bg-[#0a1021]">
-                <div className="flex items-center justify-between border-b border-white/10 px-4 py-3"><div className="flex items-center gap-2"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-600"><Bot className="h-4 w-4" /></div><div><p className="text-sm font-semibold">AgentHub AI</p><p className="text-[10px] text-emerald-400">All systems active</p></div></div><Badge className="bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/10">24/7 Active</Badge></div>
+                <div className="flex items-center justify-between border-b border-white/10 px-4 py-3"><div className="flex items-center gap-2"><img src="/agenthub-logo.svg" alt="AgentHub" className="h-8 w-8 rounded-lg object-cover" /><div><p className="text-sm font-semibold">AgentHub AI</p><p className="text-[10px] text-emerald-400">All systems active</p></div></div><Badge className="bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/10">24/7 Active</Badge></div>
                 <div className="grid min-h-[480px] grid-cols-[92px_1fr] sm:grid-cols-[145px_1fr]">
                   <aside className="border-r border-white/10 p-2 sm:p-3">{['Overview','Inbox','Leads','Bookings','Follow-ups','Knowledge','Products','Integrations'].map((item, i) => <div key={item} className={`mb-1 rounded-lg px-2 py-2 text-[10px] sm:px-3 sm:text-xs ${i===1?'bg-violet-600/25 text-white':'text-slate-500'}`}>{item}</div>)}</aside>
                   <div className="min-w-0 p-3 sm:p-5">
@@ -156,7 +155,7 @@ export default function Home() {
 
       <section id="contact" className="py-24"><div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8"><div className="rounded-[30px] border border-white/10 bg-gradient-to-br from-[#121a32] to-[#0c1122] p-8 text-center sm:p-14"><Badge className="bg-white/5 text-slate-200 hover:bg-white/5">TALK TO US</Badge><h2 className="mt-5 text-4xl font-bold">Want to see what AgentHub can do for your business?</h2><p className="mx-auto mt-5 max-w-2xl text-slate-400">Message us to discuss your business, channels, automation requirements and the best AgentHub package.</p><div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row"><a href="https://wa.me/923407465567" target="_blank" rel="noreferrer"><Button size="lg" className="h-12 sm:h-13 rounded-xl bg-emerald-600 hover:bg-emerald-500"><MessageCircle className="mr-2 h-5 w-5" /> WhatsApp us</Button></a><a href="tel:+923407465567"><Button size="lg" variant="outline" className="h-12 sm:h-13 rounded-xl border-white/15 bg-white/[0.03] text-white hover:bg-white/10 hover:text-white"><Phone className="mr-2 h-5 w-5" /> +92 340 7465567</Button></a></div></div></div></section>
 
-      <footer className="border-t border-white/10 py-8 text-sm text-slate-500"><div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8"><div className="flex items-center gap-2"><Bot className="h-4 w-4 text-violet-300" /><span>AgentHub AI</span></div><div className="flex flex-wrap gap-5"><a href="#channels" className="hover:text-white">Channels</a><a href="#features" className="hover:text-white">Features</a><a href="#pricing" className="hover:text-white">Pricing</a><a href="https://wa.me/923407465567" target="_blank" rel="noreferrer" className="hover:text-white">+92 340 7465567</a></div><span>Turn conversations into business actions.</span></div></footer>
+      <footer className="border-t border-white/10 py-8 text-sm text-slate-500"><div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8"><div className="flex items-center gap-2"><img src="/agenthub-logo.svg" alt="AgentHub" className="h-7 w-7 rounded-lg object-cover" /><span>AgentHub AI</span></div><div className="flex flex-wrap gap-5"><a href="#channels" className="hover:text-white">Channels</a><a href="#features" className="hover:text-white">Features</a><a href="#pricing" className="hover:text-white">Pricing</a><a href="https://wa.me/923407465567" target="_blank" rel="noreferrer" className="hover:text-white">+92 340 7465567</a></div><span>Turn conversations into business actions.</span></div></footer>
     </main>
   );
 }
