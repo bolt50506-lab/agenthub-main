@@ -74,9 +74,10 @@ RUN curl -L --fail --retry 5 --retry-delay 2 \
     && test $(stat -c%s /opt/omnivoice/models/omnivoice-tokenizer-Q4_K_M.gguf) -gt 180000000
 
 COPY server.py ./
+COPY launcher.py ./
 COPY bootstrap_voice.py ./
 COPY ali_voice.enc.b64 ./
 
 EXPOSE 7860
 
-CMD ["sh", "-c", "python bootstrap_voice.py && exec python server.py"]
+CMD ["python", "launcher.py"]
