@@ -83,4 +83,4 @@ COPY ali_voice.enc.b64 ./
 
 EXPOSE 7860
 
-CMD ["python", "bootstrap_voice.py"]
+CMD ["sh", "-c", "python bootstrap_voice.py && exec python server.py"]
