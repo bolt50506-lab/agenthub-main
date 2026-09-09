@@ -18,7 +18,6 @@ import {
 import {
   Sheet,
   SheetContent,
-  SheetTrigger,
 } from '@/components/ui/sheet';
 import {
   LayoutDashboard, Bot, MessageSquare, Users, Calendar, CheckSquare, ShoppingCart, CreditCard, ReceiptText,
@@ -26,7 +25,6 @@ import {
   Menu, LogOut, ChevronDown, Building, Shield, Moon, Sun, Bell, AlertCircle, Mic2, Activity,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
-import { useToast } from '@/hooks/use-toast';
 import { getSubscriptionBlockedMessage } from '@/lib/plan-limits';
 
 const NAV_ITEMS = [
@@ -59,7 +57,6 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { theme, setTheme } = useTheme();
-  const { toast } = useToast();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -123,9 +120,11 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const SidebarContent = () => (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 px-4 h-16 border-b border-border">
-        <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-          <Bot className="w-5 h-5 text-primary-foreground" />
-        </div>
+        <img
+          src="/agenthub-logo.svg"
+          alt="AgentHub"
+          className="w-9 h-9 rounded-xl object-cover shadow-sm"
+        />
         <span className="text-lg font-bold tracking-tight">AgentHub</span>
       </div>
 
