@@ -36,8 +36,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     OMNIVOICE_ENGINE_TIMEOUT=900 \
     OMNIVOICE_CHUNK_DURATION_SEC=5 \
     OMNIVOICE_CHUNK_THRESHOLD_SEC=10 \
-    OMNIVOICE_TRUE_PEAK_CEILING_DBFS=-2.0 \
-    OMNIVOICE_TRUE_PEAK_OVERSAMPLE=4 \
     OMNIVOICE_GGUF_MODEL=/opt/omnivoice/models/omnivoice-base-Q4_K_M.gguf \
     OMNIVOICE_GGUF_CODEC=/opt/omnivoice/models/omnivoice-tokenizer-Q4_K_M.gguf \
     OMNIVOICE_ENGINE_BIN=/opt/omnivoice/bin/tts-server \
@@ -78,8 +76,6 @@ RUN curl -L --fail --retry 5 --retry-delay 2 \
     && test $(stat -c%s /opt/omnivoice/models/omnivoice-tokenizer-Q4_K_M.gguf) -gt 180000000
 
 COPY server.py ./
-COPY patch_audio_output.py /tmp/patch_audio_output.py
-RUN python /tmp/patch_audio_output.py
 COPY launcher.py ./
 COPY bootstrap_voice.py ./
 COPY ali_voice.enc.b64 ./
