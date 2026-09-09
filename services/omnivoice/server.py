@@ -1,5 +1,7 @@
 import base64
 import cgi
+import gc
+import http.client
 import json
 import os
 import signal
@@ -14,6 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import numpy as np
+import psutil
 import soundfile as sf
 
 HOST = os.environ.get('HOST', '0.0.0.0')
@@ -21,6 +24,8 @@ PORT = int(os.environ.get('PORT', '7860'))
 SERVICE_SECRET = os.environ.get('AGENTHUB_WEBHOOK_SECRET', '')
 MAX_REFERENCE_SECONDS = 10
 MAX_TEXT_CHARS = 5000
+MEMORY_GUARD_MB = int(os.environ.get('OMNIVOICE_MEMORY_GUARD_MB', '850'))
+ENGINE_HTTP_TIMEOUT = int(os.environ.get('OMNIVOICE_ENGINE_TIMEOUT', '900'))
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path('/data/omnivoice') if Path('/data').exists() else BASE_DIR
 PROFILE_DIR = DATA_DIR / 'profiles'
@@ -44,6 +49,31 @@ jobs = {}
 engine_process = None
 engine_lock = threading.Lock()
 generation_lock = threading.Lock()
+
+
+class EngineUnavailableError(RuntimeError):
+    pass
+
+
+def _rss_mb(pid=None):
+    try:
+        return psutil.Process(pid or os.getpid()).memory_info().rss / (1024 * 1024)
+    except (psutil.Error, OSError):
+        return 0.0
+
+
+def current_rss_mb():
+    total = _rss_mb()
+    if engine_process is not None and engine_process.poll() is None:
+        total += _rss_mb(engine_process.pid)
+    return total
+
+
+def memory_guard():
+    rss = current_rss_mb()
+    if rss >= MEMORY_GUARD_MB:
+        raise MemoryError(f'Voice generation temporarily unavailable: memory usage is {rss:.1f} MB (guard {MEMORY_GUARD_MB} MB)')
+    return rss
 
 
 def job_path(job_id):
@@ -80,8 +110,30 @@ def http_json(url, payload=None, timeout=30):
         headers['Content-Type'] = 'application/json'
         method = 'POST'
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(req, timeout=timeout) as response:
-        return response.status, response.read(), response.headers
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            return response.status, response.read(), response.headers
+    except (http.client.RemoteDisconnected, ConnectionResetError, BrokenPipeError) as exc:
+        raise EngineUnavailableError(f'Native OmniVoice engine disconnected: {exc}') from exc
+
+
+def synthesize_native_with_recovery(payload, max_retries=1, timeout=ENGINE_HTTP_TIMEOUT):
+    last_error = None
+    for attempt in range(max_retries + 1):
+        started = time.time()
+        print(f'[Engine] synthesis_call_start attempt={attempt + 1} rss_mb={current_rss_mb():.1f}')
+        try:
+            status, data, headers = http_json(f'{ENGINE_URL}/v1/audio/speech', payload, timeout=timeout)
+            print(f'[Engine] synthesis_call_end attempt={attempt + 1} status={status} bytes={len(data)} elapsed_ms={(time.time() - started) * 1000:.0f} rss_mb={current_rss_mb():.1f}')
+            return status, data, headers
+        except (EngineUnavailableError, TimeoutError, urllib.error.URLError) as exc:
+            last_error = exc
+            print(f'[Engine] synthesis_call_failed attempt={attempt + 1} error={exc} rss_mb={current_rss_mb():.1f}')
+            if attempt < max_retries:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise EngineUnavailableError(f'Native OmniVoice engine unavailable: {exc}') from exc
+    raise EngineUnavailableError(f'Native OmniVoice engine unavailable: {last_error}')
 
 
 def wait_for_engine(timeout=300):
@@ -107,11 +159,7 @@ def register_voice(profile):
         raise RuntimeError('Existing Ali voice RVQ reference is missing')
     if not ref_text:
         raise RuntimeError('Existing Ali voice reference transcript is missing')
-    payload = {
-        'name': VOICE_NAME,
-        'ref_text': ref_text,
-        'rvq_b64': base64.b64encode(Path(rvq_path).read_bytes()).decode('ascii'),
-    }
+    payload = {'name': VOICE_NAME, 'ref_text': ref_text, 'rvq_b64': base64.b64encode(Path(rvq_path).read_bytes()).decode('ascii')}
     status, body, _ = http_json(f'{ENGINE_URL}/v1/audio/voices', payload, timeout=120)
     if status not in (200, 201):
         raise RuntimeError(f'Voice registration failed: HTTP {status}: {body[:500].decode("utf-8", "replace")}')
@@ -131,12 +179,7 @@ def start_engine():
     env.setdefault('MKL_NUM_THREADS', '1')
     env.setdefault('GGML_N_THREADS', os.environ.get('GGML_N_THREADS', '2'))
     print(f'[OmniVoice] Starting native CPU engine model={MODEL_PATH} codec={CODEC_PATH} steps={NUM_STEPS} ggml_threads={env.get("GGML_N_THREADS")}')
-    engine_process = subprocess.Popen([
-        ENGINE_BIN,
-        '--model', MODEL_PATH,
-        '--codec', CODEC_PATH,
-        '--port', str(ENGINE_PORT),
-    ], env=env)
+    engine_process = subprocess.Popen([ENGINE_BIN, '--model', MODEL_PATH, '--codec', CODEC_PATH, '--port', str(ENGINE_PORT)], env=env)
     wait_for_engine()
     profile = read_profile('8fbf738572e14231b793c1d7651dc331')
     if not profile:
@@ -149,32 +192,41 @@ def language_value(language):
     return value or 'ur'
 
 
-def generate_job(job_id, profile, text, language, instruct=None):
+def generate_job(job_id, profile, text, language, instruct=None, lock_held=False):
+    acquired_here = False
     try:
-        with generation_lock:
-            save_job(job_id, {'status': 'processing', 'started_at': time.time()})
-            payload = {
-                'input': text,
-                'voice': VOICE_NAME,
-                'language': language_value(language),
-                'response_format': 'wav',
-                'seed': -1,
-                'num_step': NUM_STEPS,
-            }
-            if instruct:
-                payload['instructions'] = str(instruct)
-            status, data, _ = http_json(f'{ENGINE_URL}/v1/audio/speech', payload, timeout=900)
-            if status != 200 or not data:
-                raise RuntimeError(f'Native OmniVoice synthesis failed: HTTP {status}: {data[:1000].decode("utf-8", "replace")}')
-            output = OUTPUT_DIR / f'{job_id}.wav'
-            tmp = output.with_suffix('.tmp.wav')
-            tmp.write_bytes(data)
-            tmp.replace(output)
-            save_job(job_id, {'status': 'completed', 'path': str(output), 'completed_at': time.time()})
-            print(f'[OmniVoice] Generated {job_id} ({len(data)} bytes) in {time.time() - float(read_job(job_id).get("started_at", time.time())):.1f}s')
+        if not lock_held:
+            generation_lock.acquire()
+            acquired_here = True
+        save_job(job_id, {'status': 'processing', 'started_at': time.time()})
+        payload = {'input': text, 'voice': VOICE_NAME, 'language': language_value(language), 'response_format': 'wav', 'seed': -1, 'num_step': NUM_STEPS}
+        if instruct:
+            payload['instructions'] = str(instruct)
+        print(f'[Engine] generation_start job={job_id} rss_mb={current_rss_mb():.1f} guard_mb={MEMORY_GUARD_MB}')
+        status, data, _ = synthesize_native_with_recovery(payload, max_retries=1, timeout=ENGINE_HTTP_TIMEOUT)
+        if status != 200 or not data:
+            raise RuntimeError(f'Native OmniVoice synthesis failed: HTTP {status}: {data[:1000].decode("utf-8", "replace")}')
+        output = OUTPUT_DIR / f'{job_id}.wav'
+        tmp = output.with_suffix('.tmp.wav')
+        tmp.write_bytes(data)
+        tmp.replace(output)
+        audio_bytes = len(data)
+        del data
+        gc.collect()
+        print(f'[Engine] generation_decode_cleanup job={job_id} freed_python_buffers rss_mb={current_rss_mb():.1f}')
+        started_at = float(read_job(job_id).get('started_at', time.time()))
+        save_job(job_id, {'status': 'completed', 'path': str(output), 'completed_at': time.time()})
+        print(f'[OmniVoice] Generated {job_id} ({audio_bytes} bytes) in {time.time() - started_at:.1f}s rss_mb={current_rss_mb():.1f}')
+    except EngineUnavailableError as exc:
+        save_job(job_id, {'status': 'failed', 'error': str(exc), 'retryable': True, 'failed_at': time.time()})
+        print(f'[OmniVoice] Job {job_id} failed cleanly: {exc}')
     except Exception as exc:
         traceback.print_exc()
-        save_job(job_id, {'status': 'failed', 'error': str(exc)})
+        save_job(job_id, {'status': 'failed', 'error': str(exc), 'retryable': isinstance(exc, MemoryError), 'failed_at': time.time()})
+    finally:
+        gc.collect()
+        if lock_held or acquired_here:
+            generation_lock.release()
 
 
 def profile_path(profile_id):
@@ -208,6 +260,8 @@ def save_reference(file_bytes, filename, profile_id):
         if len(data) > max_samples:
             data = data[:max_samples]
         sf.write(str(path), data, int(rate))
+        del data
+        gc.collect()
     except Exception:
         path.unlink(missing_ok=True)
         raise
@@ -236,11 +290,7 @@ class Handler(BaseHTTPRequestHandler):
         return json.loads(self.rfile.read(length).decode('utf-8'))
 
     def _read_multipart(self):
-        env = {
-            'REQUEST_METHOD': 'POST',
-            'CONTENT_TYPE': self.headers.get('Content-Type', ''),
-            'CONTENT_LENGTH': self.headers.get('Content-Length', '0'),
-        }
+        env = {'REQUEST_METHOD': 'POST', 'CONTENT_TYPE': self.headers.get('Content-Type', ''), 'CONTENT_LENGTH': self.headers.get('Content-Length', '0')}
         form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ=env, keep_blank_values=True)
         fields, files = {}, []
         for key in form.keys():
@@ -278,12 +328,16 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(409, {'error': 'Generated audio is no longer available; retry generation', 'status': 'failed'})
                 return
             data = path.read_bytes()
-            self.send_response(200)
-            self.send_header('Content-Type', 'audio/wav')
-            self.send_header('Content-Length', str(len(data)))
-            self.send_header('Cache-Control', 'no-store')
-            self.end_headers()
-            self.wfile.write(data)
+            try:
+                self.send_response(200)
+                self.send_header('Content-Type', 'audio/wav')
+                self.send_header('Content-Length', str(len(data)))
+                self.send_header('Cache-Control', 'no-store')
+                self.end_headers()
+                self.wfile.write(data)
+            finally:
+                del data
+                gc.collect()
             return
         if self.path.startswith('/history/'):
             job_id = self.path.split('/')[2].split('?', 1)[0]
@@ -309,15 +363,7 @@ class Handler(BaseHTTPRequestHandler):
                 if len(profile_id) > 128 or '/' in profile_id or '\\' in profile_id or profile_id in {'.', '..'}:
                     self._json(400, {'error': 'Invalid profile id'})
                     return
-                profile = {
-                    'id': profile_id,
-                    'name': str(body.get('name') or profile_id),
-                    'description': body.get('description'),
-                    'language': body.get('language') or 'en',
-                    'reference_audio': None,
-                    'reference_rvq': None,
-                    'reference_text': None,
-                }
+                profile = {'id': profile_id, 'name': str(body.get('name') or profile_id), 'description': body.get('description'), 'language': body.get('language') or 'en', 'reference_audio': None, 'reference_rvq': None, 'reference_text': None}
                 write_profile(profile)
                 self._json(200, profile)
                 return
@@ -335,6 +381,9 @@ class Handler(BaseHTTPRequestHandler):
                 profile['reference_audio'] = save_reference(content, filename, profile_id)
                 profile['reference_text'] = (fields.get('reference_text') or '').strip() or None
                 write_profile(profile)
+                del content
+                files.clear()
+                gc.collect()
                 self._json(200, {'ok': True, 'id': profile_id})
                 return
             if self.path == '/generate':
@@ -351,9 +400,24 @@ class Handler(BaseHTTPRequestHandler):
                 if not profile:
                     self._json(404, {'error': 'Profile not found'})
                     return
+                try:
+                    rss = memory_guard()
+                except MemoryError as exc:
+                    print(f'[Engine] generation_preflight_rejected rss_mb={current_rss_mb():.1f} guard_mb={MEMORY_GUARD_MB} reason={exc}')
+                    self._json(503, {'error': 'Voice generation is temporarily busy; retry shortly', 'retryable': True})
+                    return
+                if not generation_lock.acquire(blocking=False):
+                    print('[Engine] generation_preflight_rejected reason=generation_in_progress')
+                    self._json(503, {'error': 'Voice generation is busy; retry shortly', 'retryable': True})
+                    return
+                print(f'[Engine] generation_preflight rss_mb={rss:.1f} guard_mb={MEMORY_GUARD_MB} concurrency=1')
                 job_id = uuid.uuid4().hex
                 save_job(job_id, {'status': 'processing', 'created_at': time.time()})
-                threading.Thread(target=generate_job, args=(job_id, profile, text, str(body.get('language') or profile.get('language') or 'ur'), body.get('instruct')), daemon=True).start()
+                try:
+                    threading.Thread(target=generate_job, args=(job_id, profile, text, str(body.get('language') or profile.get('language') or 'ur'), body.get('instruct'), True), daemon=True).start()
+                except Exception:
+                    generation_lock.release()
+                    raise
                 self._json(200, {'id': job_id, 'status': 'processing', 'num_steps': NUM_STEPS})
                 return
             self.send_error(404)
