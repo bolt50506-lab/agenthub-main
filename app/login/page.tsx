@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Bot, Loader2, MessageCircle, Tags } from 'lucide-react';
+import { Loader2, MessageCircle, Tags } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 export default function LoginPage() {
@@ -51,11 +51,10 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-50 to-white dark:from-slate-950 dark:to-slate-900 px-4">
       <div className="w-full max-w-md">
-        <div className="flex items-center justify-center gap-2 mb-8">
-          <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
-            <Bot className="w-6 h-6 text-primary-foreground" />
-          </div>
+        <div className="flex flex-col items-center justify-center mb-8">
+          <img src="/agenthub-logo.svg" alt="AgentHub" className="w-16 h-16 rounded-2xl object-cover shadow-lg mb-3" />
           <span className="text-2xl font-bold tracking-tight">AgentHub</span>
+          <span className="mt-1 text-xs text-muted-foreground tracking-[0.18em] uppercase">Automate · Connect · Grow</span>
         </div>
 
         <Card>
