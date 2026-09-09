@@ -97,43 +97,7 @@ export async function POST(req: NextRequest) {
   const senderName = contact?.profile?.name ?? null;
   const textBody = message.text?.body ?? '';
 
-  /*
-  |--------------------------------------------------------------------------
-  | Group detection
-  |--------------------------------------------------------------------------
-  |
-  | IMPORTANT: the official Meta WhatsApp Business Cloud API does not
-  | deliver group messages to a business webhook the way a personal
-  | WhatsApp account (Baileys/QR) does - a Cloud API business number
-  | cannot passively receive automated group traffic via this endpoint.
-  | The previous implementation checked whether the message TEXT
-  | contained the literal substring "__group__", which is not a real
-  | signal WhatsApp ever sends and would never match a genuine message,
-  | so this branch was permanently dead code that always treated every
-  | message as private.
-  |
-  | This now checks the sender id for the actual WhatsApp group JID
-  | suffix (@g.us), which is what any BSP/gateway that DOES forward
-  | group traffic would use. For a standard Meta Cloud API webhook this
-  | will still normally be false, and that's expected/correct - it is
-  | not a bug, it's a platform limitation. If you need automated group
-  | replies, that requires the QR/Baileys channel.
-  |
-  */
-
   const isGroup = senderPhone.endsWith('@g.us');
-
-  /*
-  |--------------------------------------------------------------------------
-  | Duplicate message protection
-  |--------------------------------------------------------------------------
-  |
-  | Meta can redeliver the same webhook event on retry. Use the
-  | WhatsApp message id to make sure we never store/reply to the same
-  | message twice.
-  |
-  */
-
   const whatsappMessageId = message.id ?? null;
 
   if (whatsappMessageId) {
@@ -180,14 +144,17 @@ export async function POST(req: NextRequest) {
   let conversationId: string | null = null;
   const { data: existingConv } = await supabase
     .from('conversations')
-    .select('id')
+    .select('id, ai_enabled')
     .eq('business_id', businessId)
     .eq('customer_id', customerId)
     .eq('channel', 'whatsapp')
     .maybeSingle();
 
+  let conversationAiEnabled = true;
+
   if (existingConv) {
     conversationId = existingConv.id;
+    conversationAiEnabled = existingConv.ai_enabled !== false;
   } else {
     const { data: newConv } = await supabase
       .from('conversations')
@@ -200,9 +167,10 @@ export async function POST(req: NextRequest) {
         status: 'active',
         ai_enabled: true,
       })
-      .select()
+      .select('id, ai_enabled')
       .maybeSingle();
     conversationId = newConv?.id ?? null;
+    conversationAiEnabled = newConv?.ai_enabled !== false;
   }
 
   if (!conversationId) {
@@ -223,6 +191,19 @@ export async function POST(req: NextRequest) {
       whatsapp_message_id: whatsappMessageId,
     },
   });
+
+  // Human takeover must stop all automatic AI processing immediately.
+  if (!conversationAiEnabled) {
+    await supabase
+      .from('conversations')
+      .update({ last_message_at: new Date().toISOString() })
+      .eq('id', conversationId);
+
+    return NextResponse.json(
+      { status: 'human_mode', conversationId, ai_enabled: false },
+      { headers: CORS }
+    );
+  }
 
   let shouldReply = true;
   let replyReason = 'Default reply';
@@ -248,12 +229,33 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ status: 'ignored', reason: replyReason }, { headers: CORS });
   }
 
+  // Re-read takeover state immediately before any AI/provider work.
+  const { data: aiStateBeforeGeneration } = await supabase
+    .from('conversations')
+    .select('ai_enabled')
+    .eq('id', conversationId)
+    .maybeSingle();
+
+  if (aiStateBeforeGeneration?.ai_enabled === false) {
+    return NextResponse.json(
+      { status: 'human_mode', conversationId, ai_enabled: false },
+      { headers: CORS }
+    );
+  }
+
   let reply = '';
   const { data: conv } = await supabase
     .from('conversations')
-    .select('agent_id')
+    .select('agent_id, ai_enabled')
     .eq('id', conversationId)
     .maybeSingle();
+
+  if (conv?.ai_enabled === false) {
+    return NextResponse.json(
+      { status: 'human_mode', conversationId, ai_enabled: false },
+      { headers: CORS }
+    );
+  }
 
   if (conv?.agent_id) {
     const { data: agentData } = await supabase
@@ -305,33 +307,6 @@ export async function POST(req: NextRequest) {
         const products = productsResult.data;
         stage('context_queries_parallel', contextStartedAt);
 
-        /* OLD SERIAL QUERIES REMOVED
-        const { data: prevMessages } = await supabase
-          .from('messages')
-          .select('sender_type, content')
-          .eq('conversation_id', conversationId)
-          .order('created_at', { ascending: true })
-          .limit(6);
-
-        // Load knowledge items for business context
-        const { data: knowledgeItems } = await supabase
-          .from('knowledge_items')
-          .select('title, content, category')
-          .eq('business_id', businessId)
-          .eq('status', 'active')
-          .order('created_at', { ascending: false })
-          .limit(8);
-
-        // Load products for business context
-        const { data: products } = await supabase
-          .from('products')
-          .select('name, description, price, currency, availability, sku')
-          .eq('business_id', businessId)
-          .eq('status', 'active')
-          .order('created_at', { ascending: false })
-          .limit(8);
-        */
-
         let systemPrompt = `You are ${agentData.name}. Purpose: ${agentData.purpose}. Style: ${agentData.communication_style || 'professional'}. Goal: ${agentData.primary_goal || 'help customers'}. Give concise, direct replies suitable for instant messaging. Do not over-explain unless the customer asks for detail.`;
         systemPrompt += `\n\n${buildLeadConversionDirective()}`;
 
@@ -356,7 +331,6 @@ export async function POST(req: NextRequest) {
           systemPrompt += ` Respond in ${settings.response_language}.`;
         }
 
-        // Add group rules context if this is a group message
         if (isGroup) {
           const { data: groupRules } = await supabase
             .from('group_rules')
@@ -409,7 +383,6 @@ export async function POST(req: NextRequest) {
           reply = '';
         }
       } else {
-        // No AI provider configured — return clear error message
         reply = 'No AI provider has been configured for this business. Please configure an AI provider in the admin panel.';
       }
     }
@@ -419,9 +392,23 @@ export async function POST(req: NextRequest) {
     reply = 'Thank you for your message. Our team will get back to you shortly.';
   }
 
-  // Avoid sending error messages about missing AI provider to the customer
   if (reply.startsWith('No AI provider has been configured')) {
     reply = 'Thank you for your message. Our team will get back to you shortly.';
+  }
+
+  // A human can take over while generation is running. Check again before
+  // persisting or delivering any automatic response.
+  const { data: deliveryConv } = await supabase
+    .from('conversations')
+    .select('ai_enabled')
+    .eq('id', conversationId)
+    .maybeSingle();
+
+  if (deliveryConv?.ai_enabled === false) {
+    return NextResponse.json(
+      { status: 'human_mode', conversationId, ai_enabled: false },
+      { headers: CORS }
+    );
   }
 
   await supabase.from('messages').insert({
@@ -438,6 +425,20 @@ export async function POST(req: NextRequest) {
   const accessToken = config.access_token as string | undefined;
   if (accessToken && config.business_phone) {
     try {
+      // Final state check immediately before external WhatsApp delivery.
+      const { data: finalDeliveryState } = await supabase
+        .from('conversations')
+        .select('ai_enabled')
+        .eq('id', conversationId)
+        .maybeSingle();
+
+      if (finalDeliveryState?.ai_enabled === false) {
+        return NextResponse.json(
+          { status: 'human_mode', conversationId, ai_enabled: false },
+          { headers: CORS }
+        );
+      }
+
       await fetch(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
