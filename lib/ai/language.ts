@@ -28,7 +28,7 @@ function words(text: string) {
 export function detectReplyLanguage(text: string): ReplyLanguage {
   const value = text.trim();
   if (!value) return 'english';
-  if (/\u0900-\u097F/.test(value)) return 'roman_urdu';
+  if (/[\u0900-\u097F]/.test(value)) return 'roman_urdu';
   if (/[\u0600-\u06FF]/.test(value)) return 'urdu';
 
   const tokens = words(value);
