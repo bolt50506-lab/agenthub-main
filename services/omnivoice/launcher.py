@@ -10,6 +10,7 @@ import server
 
 
 _original_synthesize = server.synthesize_native_with_recovery
+_original_encode_reference_rvq = server.encode_reference_rvq
 _recovery_lock = threading.Lock()
 
 
@@ -93,6 +94,36 @@ def _safe_start_engine():
             server.register_all_profiles()
         except Exception as register_exc:
             print(f'[Launcher] optional profile registration failed: {register_exc}')
+
+
+def _safe_encode_reference_rvq(reference_wav, profile_id):
+    """Encode RVQ without co-resident tts-server memory pressure.
+
+    The codec binary is a separate native process. On Railway's 1 GB cgroup,
+    running it beside tts-server can transiently hit the cgroup limit even
+    though the tts-server's steady-state RSS is much lower. Hold engine_lock
+    (the same lock used around synthesis HTTP) so profile maintenance never
+    overlaps a generation, stop tts-server, run the codec, then restore the
+    engine. This does not use generation_lock, so profile management remains
+    independent of the public generation-busy gate.
+    """
+    with server.engine_lock:
+        was_running = _engine_is_alive()
+        if was_running:
+            print(f'[Launcher] profile RVQ maintenance: stopping native engine before codec encode profile={profile_id} rss_mb={server.current_rss_mb():.1f}')
+            server.stop_engine()
+        try:
+            result = _original_encode_reference_rvq(reference_wav, profile_id)
+            print(f'[Launcher] profile RVQ encode completed profile={profile_id} rss_mb={server.current_rss_mb():.1f}')
+            return result
+        finally:
+            if was_running:
+                print(f'[Launcher] profile RVQ maintenance: restarting native engine profile={profile_id}')
+                server.start_engine()
+                print(f'[Launcher] profile RVQ maintenance: native engine restored profile={profile_id} rss_mb={server.current_rss_mb():.1f}')
+
+
+server.encode_reference_rvq = _safe_encode_reference_rvq
 
 
 def _recover_and_retry(payload, timeout):
