@@ -12,6 +12,11 @@ _original_synthesize = server.synthesize_native_with_recovery
 _original_encode_reference_rvq = server.encode_reference_rvq
 _recovery_lock = threading.Lock()
 
+# Software-only safety cap: every native /generate request is limited to a
+# short voice segment, regardless of which caller invokes the OmniVoice API.
+server.MAX_TEXT_CHARS = int(os.environ.get('OMNIVOICE_MAX_TEXT_CHARS', '200'))
+print(f'[Launcher] OmniVoice generation text cap={server.MAX_TEXT_CHARS} chars')
+
 def _cgroup_snapshot():
     result = {}
     for name in ('memory.current', 'memory.peak', 'memory.max', 'memory.events'):
