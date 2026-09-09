@@ -13,6 +13,39 @@ _original_synthesize = server.synthesize_native_with_recovery
 _recovery_lock = threading.Lock()
 
 
+def _cgroup_snapshot():
+    """Return Linux cgroup memory counters for post-mortem native exits."""
+    result = {}
+    for name in ('memory.current', 'memory.peak', 'memory.max', 'memory.events'):
+        path = Path('/sys/fs/cgroup') / name
+        try:
+            result[name] = path.read_text(encoding='utf-8').strip()
+        except Exception:
+            pass
+    return result
+
+
+def _log_engine_exit(process, reason):
+    if process is None:
+        return
+    rc = process.poll()
+    if rc is None:
+        return
+    signal_name = None
+    if rc < 0:
+        try:
+            signal_name = signal.Signals(-rc).name
+        except ValueError:
+            signal_name = f'SIG{-rc}'
+    print('[Launcher] native engine exit diagnostics:', {
+        'reason': reason,
+        'pid': process.pid,
+        'returncode': rc,
+        'signal': signal_name,
+        'cgroup': _cgroup_snapshot(),
+    })
+
+
 def _engine_is_alive():
     process = server.engine_process
     return process is not None and process.poll() is None
@@ -86,11 +119,18 @@ def watchdog():
     while True:
         time.sleep(5)
         try:
-            if not _engine_is_alive():
+            process = server.engine_process
+            if process is not None and process.poll() is not None:
+                _log_engine_exit(process, 'watchdog_detected_dead_engine')
                 print('[Launcher] native engine is not running; restarting')
                 with _recovery_lock:
-                    if not _engine_is_alive():
+                    if server.engine_process is process and process.poll() is not None:
                         server.restart_engine('watchdog_engine_dead')
+            elif process is None:
+                print('[Launcher] native engine process handle is missing; restarting')
+                with _recovery_lock:
+                    if server.engine_process is None:
+                        server.restart_engine('watchdog_missing_process_handle')
         except Exception as exc:
             print(f'[Launcher] watchdog recovery failed: {exc}')
 
