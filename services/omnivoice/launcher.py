@@ -1,3 +1,4 @@
+import runpy
 import signal
 import threading
 import time
@@ -12,6 +13,26 @@ _recovery_lock = threading.Lock()
 def _engine_is_alive():
     process = server.engine_process
     return process is not None and process.poll() is None
+
+
+def _safe_start_engine():
+    # Restore the persisted legacy Ali profile when bootstrap material is
+    # available, but never let a missing voice take the whole HTTP service down.
+    try:
+        runpy.run_path(str(server.BASE_DIR / 'bootstrap_voice.py'), run_name='__omnivoice_bootstrap__')
+    except Exception as exc:
+        print(f'[Launcher] voice bootstrap skipped: {exc}')
+
+    try:
+        server.start_engine()
+    except RuntimeError as exc:
+        if str(exc) != 'Existing Ali profile is missing':
+            raise
+        print('[Launcher] legacy Ali profile missing; continuing without default Ali voice')
+        try:
+            server.register_all_profiles()
+        except Exception as register_exc:
+            print(f'[Launcher] optional profile registration failed: {register_exc}')
 
 
 def _recover_and_retry(payload, timeout):
@@ -50,7 +71,7 @@ def watchdog():
 signal.signal(signal.SIGTERM, server.shutdown)
 signal.signal(signal.SIGINT, server.shutdown)
 
-server.start_engine()
+_safe_start_engine()
 threading.Thread(target=watchdog, daemon=True, name='omnivoice-engine-watchdog').start()
 print(f'[OmniVoice] Native service listening on {server.HOST}:{server.PORT}')
 server.ThreadingHTTPServer((server.HOST, server.PORT), server.Handler).serve_forever()
