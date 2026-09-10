@@ -13,6 +13,10 @@ const EXECUTABLE_ACTIONS = new Set([
   'prepare_payment_reminder',
   'inventory_alert',
   'appointment_recovery',
+  'appointment_reminder',
+  'book_appointment',
+  'reschedule_appointment',
+  'human_handoff',
   'recover_conversation',
   'capture_lead',
   'update_lead',
@@ -49,8 +53,9 @@ async function queueFollowup(params: {
   appointmentId?: string | null;
   message: string;
   taskType?: string;
+  scheduledAt?: string;
 }) {
-  const { businessId, leadId, conversationId, appointmentId, message, taskType = 'follow_up' } = params;
+  const { businessId, leadId, conversationId, appointmentId, message, taskType = 'follow_up', scheduledAt } = params;
   let existingQuery = supabase
     .from('follow_up_tasks')
     .select('id')
@@ -68,7 +73,7 @@ async function queueFollowup(params: {
     appointment_id: appointmentId || null,
     conversation_id: conversationId || null,
     task_type: taskType,
-    scheduled_at: new Date().toISOString(),
+    scheduled_at: scheduledAt || new Date().toISOString(),
     status: 'pending',
     notes: message,
     channel: 'whatsapp',
@@ -101,6 +106,34 @@ async function autoDiscover(businessId: string, limit: number) {
         risk_level: 'medium',
         idempotency_key: `appointment-recovery:${a.id}`,
         payload: { lead_id: a.lead_id },
+        status: 'approved',
+      });
+    }
+  }
+
+  if (settings.auto_appointment_reminders !== false) {
+    const now = new Date();
+    const reminderUntil = new Date(Date.now() + 24 * 3600000);
+    const { data: appointments } = await supabase.from('appointments')
+      .select('id,lead_id,customer_name,date,start_time,service_name,status,updated_at')
+      .eq('business_id', businessId)
+      .in('status', ['confirmed', 'scheduled', 'booked'])
+      .limit(limit);
+    for (const a of appointments || []) {
+      if (!a.lead_id || !a.date || !a.start_time) continue;
+      const appointmentAt = new Date(`${a.date}T${a.start_time}`);
+      if (Number.isNaN(appointmentAt.getTime()) || appointmentAt < now || appointmentAt > reminderUntil) continue;
+      const reminderKey = `appointment-reminder:${a.id}:${a.date}:${a.start_time}`;
+      actions.push({
+        business_id: businessId,
+        action_type: 'appointment_reminder',
+        entity_type: 'appointment',
+        entity_id: a.id,
+        title: `Appointment reminder for ${a.customer_name || 'customer'}`,
+        description: 'Send a WhatsApp reminder before the appointment.',
+        risk_level: 'low',
+        idempotency_key: reminderKey,
+        payload: { lead_id: a.lead_id, appointment_at: appointmentAt.toISOString() },
         status: 'approved',
       });
     }
@@ -210,9 +243,57 @@ export async function POST(request: NextRequest) {
       } else if (type === 'appointment_recovery') {
         const { data: appointment } = await supabase.from('appointments').select('id,lead_id,customer_name,service_name,status,date,start_time').eq('id', claimed.entity_id).eq('business_id', bid).maybeSingle();
         if (!appointment) throw new Error('Appointment no longer exists');
-        if (appointment.status !== 'cancelled') { result = { skipped: true, reason: 'appointment_no_longer_cancelled' }; }
-        else if (!appointment.lead_id) { result = { skipped: true, reason: 'no_linked_lead' }; }
+        if (appointment.status !== 'cancelled') result = { skipped: true, reason: 'appointment_no_longer_cancelled' };
+        else if (!appointment.lead_id) result = { skipped: true, reason: 'no_linked_lead' };
         else result = await queueFollowup({ businessId: bid, leadId: appointment.lead_id, appointmentId: appointment.id, message: `Hi ${appointment.customer_name || ''}! We noticed your ${appointment.service_name ? appointment.service_name + ' ' : ''}appointment was cancelled. Would you like me to help arrange a new time? 😊`.trim(), taskType: 'appointment_recovery' });
+      } else if (type === 'appointment_reminder') {
+        const { data: appointment } = await supabase.from('appointments').select('id,lead_id,customer_name,service_name,status,date,start_time').eq('id', claimed.entity_id).eq('business_id', bid).maybeSingle();
+        if (!appointment) throw new Error('Appointment no longer exists');
+        if (!['confirmed', 'scheduled', 'booked'].includes(String(appointment.status))) result = { skipped: true, reason: 'appointment_not_active' };
+        else if (!appointment.lead_id) result = { skipped: true, reason: 'no_linked_lead' };
+        else result = await queueFollowup({ businessId: bid, leadId: appointment.lead_id, appointmentId: appointment.id, message: `Hi ${appointment.customer_name || ''}! Friendly reminder: your${appointment.service_name ? ` ${appointment.service_name}` : ''} appointment is scheduled for ${appointment.date} at ${appointment.start_time}. Please let us know if you need to reschedule. 😊`.trim(), taskType: 'appointment_reminder', scheduledAt: new Date().toISOString() });
+      } else if (type === 'book_appointment') {
+        const leadId = text(payload.lead_id);
+        const date = text(payload.date);
+        const startTime = text(payload.start_time);
+        if (!leadId || !date || !startTime) throw new Error('lead_id, date and start_time are required');
+        const durationMinutes = Math.max(Number(payload.duration_minutes) || 30, 5);
+        const start = new Date(`${date}T${startTime}`);
+        if (Number.isNaN(start.getTime())) throw new Error('Invalid appointment date/time');
+        const end = new Date(start.getTime() + durationMinutes * 60000);
+        const endTime = end.toTimeString().slice(0, 8);
+        const { data: conflict } = await supabase.from('appointments').select('id').eq('business_id', bid).eq('date', date).in('status', ['confirmed', 'scheduled', 'booked']).lt('start_time', endTime).gt('end_time', startTime).limit(1).maybeSingle();
+        if (conflict) throw new Error('Requested appointment slot is already occupied');
+        const { data: lead } = await supabase.from('leads').select('id,customer_id,name').eq('id', leadId).eq('business_id', bid).maybeSingle();
+        if (!lead) throw new Error('Lead no longer exists');
+        const { data: appointment, error: appointmentError } = await supabase.from('appointments').insert({ business_id: bid, lead_id: lead.id, customer_id: lead.customer_id || null, customer_name: lead.name || 'Customer', date, start_time: startTime, end_time: endTime, status: 'confirmed', notes: text(payload.notes), service_id: payload.service_id || null, service_name: text(payload.service_name), service_price: payload.service_price ?? null, currency: text(payload.currency, 'PKR'), payment_status: 'unpaid' }).select('id,date,start_time,end_time,status').single();
+        if (appointmentError) throw new Error(appointmentError.message);
+        result = { booked: true, appointment };
+      } else if (type === 'reschedule_appointment') {
+        const date = text(payload.date);
+        const startTime = text(payload.start_time);
+        if (!date || !startTime) throw new Error('date and start_time are required');
+        const { data: current } = await supabase.from('appointments').select('id,lead_id,status').eq('id', claimed.entity_id).eq('business_id', bid).maybeSingle();
+        if (!current) throw new Error('Appointment no longer exists');
+        if (['cancelled', 'completed', 'no_show'].includes(String(current.status))) throw new Error('Appointment cannot be rescheduled in its current status');
+        const durationMinutes = Math.max(Number(payload.duration_minutes) || 30, 5);
+        const start = new Date(`${date}T${startTime}`);
+        if (Number.isNaN(start.getTime())) throw new Error('Invalid appointment date/time');
+        const endTime = new Date(start.getTime() + durationMinutes * 60000).toTimeString().slice(0, 8);
+        const { data: conflict } = await supabase.from('appointments').select('id').eq('business_id', bid).eq('date', date).neq('id', current.id).in('status', ['confirmed', 'scheduled', 'booked']).lt('start_time', endTime).gt('end_time', startTime).limit(1).maybeSingle();
+        if (conflict) throw new Error('Requested appointment slot is already occupied');
+        const { error: updateError } = await supabase.from('appointments').update({ date, start_time: startTime, end_time: endTime, status: 'confirmed', updated_at: new Date().toISOString() }).eq('id', current.id).eq('business_id', bid);
+        if (updateError) throw new Error(updateError.message);
+        result = { rescheduled: true, appointment_id: current.id, date, start_time: startTime, end_time: endTime };
+      } else if (type === 'human_handoff') {
+        const conversationId = text(payload.conversation_id) || (claimed.entity_type === 'conversation' ? claimed.entity_id : '');
+        if (!conversationId) throw new Error('conversation_id is required');
+        const { data: conversation } = await supabase.from('conversations').select('id,status,human_takeover').eq('id', conversationId).eq('business_id', bid).maybeSingle();
+        if (!conversation) throw new Error('Conversation no longer exists');
+        const { error: handoffError } = await supabase.from('conversations').update({ human_takeover: true, human_takeover_at: new Date().toISOString(), ai_enabled: false, ai_resume_at: null, updated_at: new Date().toISOString() }).eq('id', conversationId).eq('business_id', bid);
+        if (handoffError) throw new Error(handoffError.message);
+        await supabase.from('business_events').insert({ business_id: bid, event_type: 'operator_human_handoff', entity_type: 'conversation', entity_id: conversationId, summary: text(payload.reason, 'AI Operator escalated this conversation to a human.'), payload: { reason: text(payload.reason), priority: text(payload.priority, 'high') } });
+        result = { handed_off: true, conversation_id: conversationId };
       } else if (type === 'recover_conversation') {
         const leadId = text(payload.lead_id) || claimed.entity_id;
         const { data: lead } = await supabase.from('leads').select('id,name,phone,conversation_id,status').eq('id', leadId).eq('business_id', bid).maybeSingle();
