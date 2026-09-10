@@ -55,8 +55,6 @@ export async function POST(req: NextRequest) {
     const trialStarted = new Date();
     const trialEnds = new Date(trialStarted.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
 
-    // Enterprise is used only as the trial's entitlement baseline. The active
-    // trial bypasses paid-plan limits, giving the customer the complete demo.
     const { data: enterprisePlan, error: planError } = await supabase
       .from('subscription_plans')
       .select('id')
@@ -93,14 +91,15 @@ export async function POST(req: NextRequest) {
     });
     if (memberError) throw new Error(memberError.message);
 
-    await supabase.from('profiles').update({
+    const { error: profileError } = await supabase.from('profiles').update({
       full_name: fullName,
       phone,
       active_business_id: business.id,
       onboarding_completed: false,
     }).eq('id', createdUserId);
+    if (profileError) throw new Error(profileError.message);
 
-    await supabase.from('business_subscriptions').insert({
+    const { error: subscriptionError } = await supabase.from('business_subscriptions').insert({
       business_id: business.id,
       plan_id: enterprisePlan.id,
       status: 'trial',
@@ -110,9 +109,10 @@ export async function POST(req: NextRequest) {
       trial_started_at: trialStarted.toISOString(),
       trial_ends_at: trialEnds.toISOString(),
     });
+    if (subscriptionError) throw new Error(subscriptionError.message);
 
-    await supabase.from('ai_provider_settings').insert({ business_id: business.id }).onConflict('business_id');
-    await supabase.from('group_rules').insert({ business_id: business.id }).onConflict('business_id');
+    await supabase.from('ai_provider_settings').upsert({ business_id: business.id }, { onConflict: 'business_id' });
+    await supabase.from('group_rules').upsert({ business_id: business.id }, { onConflict: 'business_id' });
     await supabase.from('integrations').insert([
       { business_id: business.id, type: 'whatsapp', name: 'WhatsApp', status: 'not_connected' },
       { business_id: business.id, type: 'website_chat', name: 'Website Chat', status: 'not_connected' },
@@ -121,19 +121,10 @@ export async function POST(req: NextRequest) {
       { business_id: business.id, type: 'linkedin', name: 'LinkedIn', status: 'not_connected' },
     ]);
 
-    return NextResponse.json({
-      success: true,
-      trialDays: TRIAL_DAYS,
-      trialEndsAt: trialEnds.toISOString(),
-      email,
-    });
+    return NextResponse.json({ success: true, trialDays: TRIAL_DAYS, trialEndsAt: trialEnds.toISOString(), email });
   } catch (error) {
-    if (createdBusinessId) {
-      await supabase.from('businesses').delete().eq('id', createdBusinessId);
-    }
-    if (createdUserId) {
-      await supabase.auth.admin.deleteUser(createdUserId);
-    }
+    if (createdBusinessId) await supabase.from('businesses').delete().eq('id', createdBusinessId);
+    if (createdUserId) await supabase.auth.admin.deleteUser(createdUserId);
     console.error('[Trial Signup] Failed:', error);
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Unable to start your free trial.' }, { status: 500 });
   }
