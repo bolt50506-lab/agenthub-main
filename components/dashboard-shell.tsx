@@ -14,7 +14,7 @@ import { Sheet, SheetContent } from '@/components/ui/sheet';
 import {
   LayoutDashboard, Bot, MessageSquare, Users, Calendar, CheckSquare, ShoppingCart, CreditCard, ReceiptText,
   BookOpen, Package, Image, Plug, UserCog, BarChart3, Settings, Zap, Menu, LogOut, ChevronDown, Building, Shield,
-  Moon, Sun, Bell, AlertCircle, Mic2, Activity, Sparkles,
+  Moon, Sun, Bell, AlertCircle, Mic2, Activity, Sparkles, MessageCircle,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { getSubscriptionBlockedMessage } from '@/lib/plan-limits';
@@ -42,6 +42,7 @@ const NAV_ITEMS = [
   { href: '/dashboard/analytics', label: 'Analytics', icon: BarChart3 },
   { href: '/dashboard/notifications', label: 'Notifications', icon: Bell },
   { href: '/dashboard/system-health', label: 'System Health', icon: Activity },
+  { href: '/dashboard/settings/welcome-message', label: 'Welcome Message', icon: MessageCircle },
   { href: '/dashboard/settings', label: 'Settings', icon: Settings },
 ];
 
