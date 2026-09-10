@@ -8,27 +8,20 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import {
-  Sheet,
-  SheetContent,
-} from '@/components/ui/sheet';
+import { Sheet, SheetContent } from '@/components/ui/sheet';
 import {
   LayoutDashboard, Bot, MessageSquare, Users, Calendar, CheckSquare, ShoppingCart, CreditCard, ReceiptText,
-  BookOpen, Package, Image, Plug, UserCog, BarChart3, Settings, Zap,
-  Menu, LogOut, ChevronDown, Building, Shield, Moon, Sun, Bell, AlertCircle, Mic2, Activity,
+  BookOpen, Package, Image, Plug, UserCog, BarChart3, Settings, Zap, Menu, LogOut, ChevronDown, Building, Shield,
+  Moon, Sun, Bell, AlertCircle, Mic2, Activity, Sparkles,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { getSubscriptionBlockedMessage } from '@/lib/plan-limits';
 
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Overview', icon: LayoutDashboard },
+  { href: '/dashboard/ai-operator', label: 'AI Business Operator', icon: Sparkles },
   { href: '/dashboard/agents', label: 'AI Agents', icon: Bot },
   { href: '/dashboard/conversations', label: 'Conversations', icon: MessageSquare },
   { href: '/dashboard/leads', label: 'Leads', icon: Users },
@@ -60,207 +53,31 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
     if (!loading) {
-      if (!user) {
-        router.push('/login');
-        return;
-      }
-      if (profile && !profile.onboarding_completed) {
-        router.push('/onboarding');
-        return;
-      }
+      if (!user) { router.push('/login'); return; }
+      if (profile && !profile.onboarding_completed) router.push('/onboarding');
     }
   }, [user, profile, loading, router]);
 
   if (loading || !user || !profile || !activeBusiness) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-pulse text-muted-foreground">Loading...</div>
-      </div>
-    );
+    return <div className="min-h-screen flex items-center justify-center"><div className="animate-pulse text-muted-foreground">Loading...</div></div>;
   }
 
-  const subStatus = activeBusiness.subscription_status;
-  const blockedMessage = getSubscriptionBlockedMessage(subStatus);
+  const blockedMessage = getSubscriptionBlockedMessage(activeBusiness.subscription_status);
+  const handleSignOut = async () => { await signOut(); router.push('/login'); };
+  if (blockedMessage) return <div className="min-h-screen flex items-center justify-center bg-background px-4"><div className="max-w-md text-center space-y-4"><div className="w-14 h-14 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mx-auto"><AlertCircle className="w-7 h-7 text-red-600 dark:text-red-400" /></div><h2 className="text-xl font-bold">Account Access Restricted</h2><p className="text-muted-foreground">{blockedMessage}</p><Button variant="outline" onClick={handleSignOut} className="gap-2"><LogOut className="w-4 h-4" /> Sign Out</Button></div></div>;
 
-  const handleSignOut = async () => {
-    await signOut();
-    router.push('/login');
-  };
+  const initials = (profile.full_name || profile.email || 'U').split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+  const SidebarContent = () => <div className="flex flex-col h-full">
+    <div className="flex items-center gap-2 px-4 h-16 border-b border-border"><img src="/agenthub-logo.svg" alt="AgentHub" className="w-9 h-9 rounded-xl object-cover shadow-sm" /><span className="text-lg font-bold tracking-tight">AgentHub</span></div>
+    <nav className="flex-1 overflow-y-auto scrollbar-thin px-3 py-4 space-y-1">{NAV_ITEMS.map((item) => { const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href)); return <Link key={item.href} href={item.href} onClick={() => setMobileOpen(false)} className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${isActive ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}><item.icon className="w-4 h-4 flex-shrink-0" />{item.label}</Link>; })}</nav>
+    {profile.is_super_admin && <div className="px-3 pb-2"><Link href="/admin" onClick={() => setMobileOpen(false)} className="flex min-w-0 items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"><Shield className="w-4 h-4 flex-shrink-0" />Super Admin</Link></div>}
+    <div className="border-t border-border p-3"><DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" className="w-full justify-start gap-2 h-auto py-2"><Building className="w-4 h-4 flex-shrink-0" /><span className="truncate text-sm">{activeBusiness.name}</span><ChevronDown className="w-3.5 h-3.5 ml-auto flex-shrink-0" /></Button></DropdownMenuTrigger><DropdownMenuContent className="w-64" align="start"><DropdownMenuLabel>Workspaces</DropdownMenuLabel><DropdownMenuSeparator />{businesses.map(({ business }) => <DropdownMenuItem key={business.id} onClick={() => setActiveBusiness(business.id)} className="flex items-center justify-between"><span className="truncate">{business.name}</span>{business.id === activeBusiness.id && <Badge variant="secondary" className="text-xs">Active</Badge>}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu></div>
+    <div className="border-t border-border p-3"><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="w-full justify-start gap-2 h-auto py-2"><Avatar className="w-8 h-8"><AvatarFallback className="text-xs bg-primary/10 text-primary">{initials}</AvatarFallback></Avatar><div className="flex flex-col items-start overflow-hidden"><span className="text-sm font-medium truncate">{profile.full_name || 'User'}</span><span className="text-xs text-muted-foreground truncate">{profile.email}</span></div></Button></DropdownMenuTrigger><DropdownMenuContent className="w-64" align="start"><DropdownMenuLabel><div className="flex flex-col"><span>{profile.full_name || 'User'}</span><span className="text-xs text-muted-foreground font-normal">{profile.email}</span>{activeMembership && <Badge variant="outline" className="mt-1 w-fit text-xs capitalize">{activeMembership.role}</Badge>}</div></DropdownMenuLabel><DropdownMenuSeparator /><DropdownMenuItem onClick={() => router.push('/dashboard/settings')}><Settings className="w-4 h-4 mr-2" />Settings</DropdownMenuItem><DropdownMenuItem onClick={handleSignOut}><LogOut className="w-4 h-4 mr-2" />Sign Out</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>
+  </div>;
 
-  if (blockedMessage) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background px-4">
-        <div className="max-w-md text-center space-y-4">
-          <div className="w-14 h-14 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mx-auto">
-            <AlertCircle className="w-7 h-7 text-red-600 dark:text-red-400" />
-          </div>
-          <h2 className="text-xl font-bold">Account Access Restricted</h2>
-          <p className="text-muted-foreground">{blockedMessage}</p>
-          <Button variant="outline" onClick={handleSignOut} className="gap-2">
-            <LogOut className="w-4 h-4" /> Sign Out
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  const initials = (profile.full_name || profile.email || 'U')
-    .split(' ')
-    .map((w) => w[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
-
-  const SidebarContent = () => (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center gap-2 px-4 h-16 border-b border-border">
-        <img
-          src="/agenthub-logo.svg"
-          alt="AgentHub"
-          className="w-9 h-9 rounded-xl object-cover shadow-sm"
-        />
-        <span className="text-lg font-bold tracking-tight">AgentHub</span>
-      </div>
-
-      <nav className="flex-1 overflow-y-auto scrollbar-thin px-3 py-4 space-y-1">
-        {NAV_ITEMS.map((item) => {
-          const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href));
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={() => setMobileOpen(false)}
-              className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                isActive
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-              }`}
-            >
-              <item.icon className="w-4 h-4 flex-shrink-0" />
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
-
-      {profile.is_super_admin && (
-        <div className="px-3 pb-2">
-          <Link
-            href="/admin"
-            onClick={() => setMobileOpen(false)}
-            className="flex min-w-0 items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-          >
-            <Shield className="w-4 h-4 flex-shrink-0" />
-            Super Admin
-          </Link>
-        </div>
-      )}
-
-      <div className="border-t border-border p-3">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" className="w-full justify-start gap-2 h-auto py-2">
-              <Building className="w-4 h-4 flex-shrink-0" />
-              <span className="truncate text-sm">{activeBusiness.name}</span>
-              <ChevronDown className="w-3.5 h-3.5 ml-auto flex-shrink-0" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent className="w-64" align="start">
-            <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {businesses.map(({ business }) => (
-              <DropdownMenuItem
-                key={business.id}
-                onClick={() => setActiveBusiness(business.id)}
-                className="flex items-center justify-between"
-              >
-                <span className="truncate">{business.name}</span>
-                {business.id === activeBusiness.id && <Badge variant="secondary" className="text-xs">Active</Badge>}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-
-      <div className="border-t border-border p-3">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="w-full justify-start gap-2 h-auto py-2">
-              <Avatar className="w-8 h-8">
-                <AvatarFallback className="text-xs bg-primary/10 text-primary">{initials}</AvatarFallback>
-              </Avatar>
-              <div className="flex flex-col items-start overflow-hidden">
-                <span className="text-sm font-medium truncate">{profile.full_name || 'User'}</span>
-                <span className="text-xs text-muted-foreground truncate">{profile.email}</span>
-              </div>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent className="w-64" align="start">
-            <DropdownMenuLabel>
-              <div className="flex flex-col">
-                <span>{profile.full_name || 'User'}</span>
-                <span className="text-xs text-muted-foreground font-normal">{profile.email}</span>
-                {activeMembership && (
-                  <Badge variant="outline" className="mt-1 w-fit text-xs capitalize">{activeMembership.role}</Badge>
-                )}
-              </div>
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => router.push('/dashboard/settings')}>
-              <Settings className="w-4 h-4 mr-2" /> Settings
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleSignOut}>
-              <LogOut className="w-4 h-4 mr-2" /> Sign Out
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </div>
-  );
-
-  return (
-    <div className="flex min-h-[100dvh] w-full overflow-x-hidden bg-background">
-      <aside className="sticky top-0 hidden h-[100dvh] w-64 flex-col border-r border-border bg-card flex-shrink-0 lg:flex">
-        <SidebarContent />
-      </aside>
-
-      <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent side="left" className="w-[min(20rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] p-0">
-          <SidebarContent />
-        </SheetContent>
-      </Sheet>
-
-      <div className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
-        <header className="flex h-16 flex-shrink-0 items-center justify-between border-b border-border bg-card px-3 sm:px-4 lg:px-6">
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setMobileOpen(true)}>
-              <Menu className="w-5 h-5" />
-            </Button>
-            <h1 className="text-lg font-semibold hidden sm:block">
-              {NAV_ITEMS.find((item) => pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href)))?.label ?? 'Dashboard'}
-            </h1>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
-              {mounted && theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-            </Button>
-            <Button variant="ghost" size="icon" className="relative">
-              <Bell className="w-5 h-5" />
-              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-primary" />
-            </Button>
-          </div>
-        </header>
-
-        <main className="mobile-safe flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 lg:p-6">
-          {children}
-        </main>
-      </div>
-    </div>
-  );
+  return <div className="flex min-h-[100dvh] w-full overflow-x-hidden bg-background"><aside className="sticky top-0 hidden h-[100dvh] w-64 flex-col border-r border-border bg-card flex-shrink-0 lg:flex"><SidebarContent /></aside><Sheet open={mobileOpen} onOpenChange={setMobileOpen}><SheetContent side="left" className="w-[min(20rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] p-0"><SidebarContent /></SheetContent></Sheet><div className="flex min-w-0 flex-1 flex-col overflow-x-hidden"><header className="flex h-16 flex-shrink-0 items-center justify-between border-b border-border bg-card px-3 sm:px-4 lg:px-6"><div className="flex items-center gap-3"><Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setMobileOpen(true)}><Menu className="w-5 h-5" /></Button><h1 className="text-lg font-semibold hidden sm:block">{NAV_ITEMS.find((item) => pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href)))?.label ?? 'Dashboard'}</h1></div><div className="flex items-center gap-2"><Button variant="ghost" size="icon" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{mounted && theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}</Button><Button variant="ghost" size="icon" className="relative"><Bell className="w-5 h-5" /><span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-primary" /></Button></div></header><main className="mobile-safe flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 lg:p-6">{children}</main></div></div>;
 }
