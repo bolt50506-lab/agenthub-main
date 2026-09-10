@@ -39,10 +39,11 @@ function parseIntent(text: string, now = new Date(), tz = DEFAULT_TZ): Intent {
 }
 async function schedule(s: SupabaseClient, businessId: string, date: string) {
   const { data } = await s.from('businesses').select('timezone,working_hours,appointment_duration').eq('id', businessId).maybeSingle();
-  const timezone = data?.timezone || DEFAULT_TZ;
-  const raw = data?.working_hours as Record<string, { open?: string; close?: string; enabled?: boolean }> | null;
+  const row = data ?? {};
+  const timezone = row.timezone || DEFAULT_TZ;
+  const raw = row.working_hours as Record<string, { open?: string; close?: string; enabled?: boolean }> | null;
   const d = raw?.[weekday(date, timezone)];
-  return { timezone, duration: Number(data?.appointment_duration) > 0 ? Number(data.appointment_duration) : 30, hours: { open: minutes(d?.open) ?? 540, close: minutes(d?.close) ?? 1080, enabled: d?.enabled !== false } as Hours };
+  return { timezone, duration: Number(row.appointment_duration) > 0 ? Number(row.appointment_duration) : 30, hours: { open: minutes(d?.open) ?? 540, close: minutes(d?.close) ?? 1080, enabled: d?.enabled !== false } as Hours };
 }
 async function available(s: SupabaseClient, bid: string, date: string, requested?: string | null) {
   const cfg = await schedule(s, bid, date); const busyQ = await s.from('appointments').select('start_time,end_time').eq('business_id', bid).eq('date', date).in('status', ACTIVE);
@@ -75,14 +76,12 @@ export async function appointmentConversationReply(s: SupabaseClient, bid: strin
   let intent = parseIntent(text, new Date(), cfg0.timezone); if (!intent.appointment) return null;
   const en = english(text); intent = await pending(s, conversationId, intent);
   const active = await customerAppointment(s, bid, customerId);
-
   if (intent.cancel) {
     if (!active) return en ? 'I could not find an active appointment for you.' : 'Aapki koi active appointment nahi mili.';
     const { error } = await s.from('appointments').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', active.id).eq('business_id', bid).in('status', ACTIVE);
     if (error) { console.error('[Appointment AI] cancel failed', error); return en ? 'I could not cancel the appointment right now. Please try again.' : 'Appointment cancel karte waqt masla aya. Dobara try karein.'; }
     return en ? `Done. Your appointment on ${active.date} at ${pretty(active.start_time.slice(0,5))} has been cancelled.` : `Done! Aapki ${active.date} ko ${pretty(active.start_time.slice(0,5))} wali appointment cancel ho gayi hai.`;
   }
-
   if (intent.reschedule) {
     if (!active) return en ? 'I could not find an active appointment to reschedule.' : 'Reschedule karne ke liye koi active appointment nahi mili.';
     if (!intent.date && !intent.time) return en ? `Your current appointment is ${active.date} at ${pretty(active.start_time.slice(0,5))}. What new date and time would you like?` : `Aapki current appointment ${active.date} ko ${pretty(active.start_time.slice(0,5))} hai. Nayi date aur time bata dein.`;
@@ -99,7 +98,6 @@ export async function appointmentConversationReply(s: SupabaseClient, bid: strin
     if (error) { console.error('[Appointment AI] reschedule failed', error); return en ? 'I could not reschedule the appointment right now.' : 'Appointment reschedule karte waqt masla aya.'; }
     return en ? `Done! Your appointment has been moved to ${date} at ${pretty(time)}.` : `Done! Aapki appointment ${date} ko ${pretty(time)} par shift ho gayi hai.`;
   }
-
   if (intent.confirmation && !intent.date && !intent.time) return en ? 'Sure. What date and time should I confirm?' : 'Ji bilkul. Kis din aur kis waqt appointment confirm karni hai?';
   if (!intent.date) return en ? 'Sure. What date and time would you like? For example: tomorrow at 4 PM.' : 'Bilkul. Appointment kis din aur kis waqt chahiye? Misal: kal 4 baje.';
   const cfg = await schedule(s, bid, intent.date);
