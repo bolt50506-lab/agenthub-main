@@ -98,7 +98,7 @@ function buildMessages(request: AIRequest): AIMessage[] {
 |
 */
 
-const DEFAULT_PROVIDER_TIMEOUT_MS = 15000;
+const DEFAULT_PROVIDER_TIMEOUT_MS = 6000;
 
 async function fetchWithTimeout(
   url: string,
@@ -834,13 +834,29 @@ export async function generateAIResponseWithFallback(
 
   const errors: string[] = [];
 
+  // Hosted fallback safety net: if the dashboard only has Gemini enabled,
+  // still use Groq when its backend-only environment key is configured.
+  const effectiveProviderConfigs = [...providerConfigs];
+  if (
+    !effectiveProviderConfigs.some((config) => config.provider === 'groq') &&
+    getEnv('GROQ_API_KEY')
+  ) {
+    effectiveProviderConfigs.push({
+      provider: 'groq',
+      apiKey: getEnv('GROQ_API_KEY'),
+      model: getEnv('GROQ_MODEL') || 'openai/gpt-oss-120b',
+      temperature: request.temperature ?? 0.7,
+      maxTokens: request.maxTokens ?? 1024,
+    });
+  }
+
   for (
     let index = 0;
-    index < providerConfigs.length;
+    index < effectiveProviderConfigs.length;
     index++
   ) {
     const config =
-      providerConfigs[index];
+      effectiveProviderConfigs[index];
 
     if (!config?.provider) {
       errors.push(
@@ -904,8 +920,8 @@ export async function generateAIResponseWithFallback(
   }
 
   const lastConfig =
-    providerConfigs[
-      providerConfigs.length - 1
+    effectiveProviderConfigs[
+      effectiveProviderConfigs.length - 1
     ];
 
   return {
