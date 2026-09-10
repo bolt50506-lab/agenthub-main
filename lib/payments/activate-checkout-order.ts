@@ -80,16 +80,62 @@ export async function activateCheckoutOrder(supabase: any, order: any, adminId: 
     if (subscriptionError || !subscription) throw new Error(subscriptionError?.message || 'Unable to activate subscription');
     subscriptionId = subscription.id;
     subscriptionEnd = subscription.end_date;
-    await supabase.from('businesses').update({ subscription_expires_at: subscription.end_date, subscription_status: 'active' }).eq('id', businessId);
+    await supabase.from('businesses').update({ subscription_expires_at: subscription.end_date, subscription_status: 'active', trial_started_at: null, trial_ends_at: null }).eq('id', businessId);
   }
 
   const now = new Date().toISOString();
 
   if (!subscriptionId && businessId) {
     const { data: existingSubscription } = await supabase.from('business_subscriptions')
-      .select('id,end_date').eq('business_id', businessId).maybeSingle();
-    subscriptionId = existingSubscription?.id || null;
-    subscriptionEnd = existingSubscription?.end_date || null;
+      .select('id,end_date,status,plan_id').eq('business_id', businessId).maybeSingle();
+    if (existingSubscription) {
+      subscriptionId = existingSubscription.id;
+      const endDate = new Date();
+      if (order.billing_cycle === 'yearly') endDate.setFullYear(endDate.getFullYear() + 1);
+      else endDate.setMonth(endDate.getMonth() + 1);
+      subscriptionEnd = endDate.toISOString();
+      const { error: updateError } = await supabase.from('business_subscriptions').update({
+        plan_id: order.plan_id,
+        status: 'active',
+        billing_cycle: order.billing_cycle,
+        start_date: now,
+        end_date: subscriptionEnd,
+        grace_end_date: null,
+        suspended_at: null,
+        reminder_stage: 0,
+        trial_started_at: null,
+        trial_ends_at: null,
+      }).eq('id', subscriptionId);
+      if (updateError) throw new Error(updateError.message);
+      await supabase.from('businesses').update({
+        subscription_plan_id: order.plan_id,
+        subscription_status: 'active',
+        subscription_started_at: now,
+        subscription_expires_at: subscriptionEnd,
+        subscription_grace_ends_at: null,
+        trial_started_at: null,
+        trial_ends_at: null,
+        status: 'active',
+      }).eq('id', businessId);
+    }
+  }
+
+  if (!subscriptionId && businessId) {
+    const endDate = new Date();
+    if (order.billing_cycle === 'yearly') endDate.setFullYear(endDate.getFullYear() + 1);
+    else endDate.setMonth(endDate.getMonth() + 1);
+    const { data: subscription, error: subscriptionError } = await supabase.from('business_subscriptions').insert({
+      business_id: businessId,
+      plan_id: order.plan_id,
+      status: 'active',
+      billing_cycle: order.billing_cycle,
+      start_date: now,
+      end_date: endDate.toISOString(),
+    }).select('id,end_date').single();
+    if (subscriptionError || !subscription) throw new Error(subscriptionError?.message || 'Unable to activate subscription');
+    subscriptionId = subscription.id;
+    subscriptionEnd = subscription.end_date;
+    await supabase.from('businesses').update({ subscription_plan_id: order.plan_id, subscription_expires_at: subscriptionEnd, subscription_status: 'active', trial_started_at: null, trial_ends_at: null }).eq('id', businessId);
   }
 
   if (businessId) {
@@ -172,6 +218,7 @@ export async function activateCheckoutOrder(supabase: any, order: any, adminId: 
     .update({
       status: 'fulfilled',
       business_id: businessId,
+      user_id: user.id,
       fulfilled_at: now,
       reviewed_at: now,
       reviewed_by: adminId,
