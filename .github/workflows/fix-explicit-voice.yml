@@ -1,0 +1,34 @@
+name: Fix explicit voice requests
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch voice request handling
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('app/api/whatsapp/incoming/route.ts')
+          s=p.read_text()
+          old="""    const configuredMode = (whatsappIntegration?.config as Record<string, unknown> | null)?.voice_reply_mode;\n    if (configuredMode === 'disabled' || configuredMode === 'text_only' || configuredMode === 'voice_only' || configuredMode === 'text_and_voice' || configuredMode === 'random') voiceReplyMode = configuredMode;\n"""
+          new="""    const configuredMode = (whatsappIntegration?.config as Record<string, unknown> | null)?.voice_reply_mode;\n    if (configuredMode === 'disabled' || configuredMode === 'text_only' || configuredMode === 'voice_only' || configuredMode === 'text_and_voice' || configuredMode === 'random') voiceReplyMode = configuredMode;\n    // An explicit request for a voice/audio reply must be honored even when the\n    // saved default is disabled. This makes messages such as 'reply in voice',\n    // 'send voice note', 'awaaz mein jawab do' work without changing the default.\n    const explicitVoiceRequest = /\\b(voice|audio|voice note|voice message|send voice|reply in voice|speak|awaaz|awaz)\\b/i.test(message) || /[آا]واز|آڈیو/.test(message);\n    if (explicitVoiceRequest) voiceReplyMode = 'voice_only';\n"""
+          if old not in s:
+              raise SystemExit('target block not found')
+          p.write_text(s.replace(old,new,1))
+          PY
+      - name: Commit patch and remove workflow
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/api/whatsapp/incoming/route.ts
+          git commit -m 'fix: honor explicit voice requests' || true
+          git push
+          rm -f .github/workflows/fix-explicit-voice.yml
+          git add .github/workflows/fix-explicit-voice.yml
+          git commit -m 'chore: remove temporary voice workflow' || true
+          git push
