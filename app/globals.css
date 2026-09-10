@@ -60,9 +60,9 @@
     --chart-4: 0 72% 52%;
     --chart-5: 280 65% 60%;
     --success: 142 71% 45%;
-    --success-foreground: 222 47% 8%;
+    --success-foreground: 0 0% 100%;
     --warning: 38 92% 50%;
-    --warning-foreground: 222 47% 8%;
+    --warning-foreground: 0 0% 100%;
   }
 }
 
