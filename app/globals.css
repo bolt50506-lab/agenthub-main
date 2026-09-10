@@ -45,8 +45,7 @@
     --primary-foreground: 222 47% 8%;
     --secondary: 217 33% 17%;
     --secondary-foreground: 210 40% 98%;
-    --muted: 217 33% 17%;
-    --muted-foreground: 215 20% 65%;
+    --muted: 217 20% 65%;
     --accent: 217 33% 17%;
     --accent-foreground: 210 40% 98%;
     --destructive: 0 63% 50%;
@@ -120,11 +119,12 @@ main a[href="/login"] {
   color: #f8fafc !important;
   line-height: 1;
   text-decoration: none;
-  transition: background .2s ease, border-color .2s ease, transform .2s ease;
+  transition: background .2s ease, border-color .2s ease, color .2s ease, transform .2s ease;
 }
 
 main a[href="/login"]:hover {
-  background: rgba(255,255,255,.12);
-  border-color: rgba(255,255,255,.28);
+  background: rgba(34,211,238,.12);
+  border-color: rgba(34,211,238,.45);
+  color: #67e8f9 !important;
   transform: translateY(-1px);
 }
