@@ -19,15 +19,11 @@ function authorized(req: NextRequest) {
   const workerHeader = req.headers.get('x-agenthub-worker') || '';
   const workerServiceId = req.headers.get('x-railway-service-id') || '';
   const matchedRailwayWorker = workerHeader === 'railway-followup-v1' && workerServiceId === RAILWAY_WORKER_SERVICE_ID;
-  if (!matchedSecret && !matchedRailwayWorker) return false;
-  return true;
+  return Boolean(matchedSecret || matchedRailwayWorker);
 }
 
 async function sendThroughAgentHub(supabase: any, task: any, lead: any) {
   const base = process.env.WHATSAPP_AGENT_URL || process.env.WHATSAPP_QR_SERVICE_URL || 'https://agenthub-whatsapp-service-production.up.railway.app';
-  // Keep the server-to-server credential aligned with the WhatsApp service.
-  // AGENTHUB_WEBHOOK_SECRET is already provisioned on both sides and is the
-  // same credential used by the cloned-voice endpoint.
   const token = process.env.WHATSAPP_AGENT_TOKEN || process.env.OUTBOUND_API_TOKEN || process.env.AGENTHUB_WEBHOOK_SECRET;
   if (task.channel !== 'whatsapp') throw new Error('Automated delivery for this channel is not connected yet');
   if (!base) throw new Error('WhatsApp service URL is not configured');
@@ -47,17 +43,47 @@ async function sendThroughAgentHub(supabase: any, task: any, lead: any) {
   if (sessionError) throw new Error('Could not resolve connected WhatsApp session: ' + sessionError.message);
   if (!session?.session_id) throw new Error('No connected WhatsApp session found for this business');
 
-  const headers: Record<string,string> = { 'content-type': 'application/json' };
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (token) headers.authorization = 'Bearer ' + token;
 
-  const response = await fetch(base.replace(/\/$/, '') + '/sessions/' + encodeURIComponent(session.session_id) + '/send', {
-    method: 'POST', headers,
+  const serviceBase = base.replace(/\/$/, '');
+  const sendUrl = serviceBase + '/sessions/' + encodeURIComponent(session.session_id) + '/send';
+  const response = await fetch(sendUrl, {
+    method: 'POST',
+    headers,
     body: JSON.stringify({ to: phone + '@s.whatsapp.net', message: task.notes || 'Hi! Just following up to see if you need any help. 😊' }),
   });
 
   const raw = await response.text();
   let data: any = null;
   try { data = raw ? JSON.parse(raw) : null; } catch {}
+
+  // Railway is intentionally authoritative about the live Baileys session. A
+  // connected row in Supabase can survive a Railway restart when the auth
+  // directory was not persisted. In that case, recreate the session so the
+  // dashboard can expose a fresh QR instead of retrying a dead socket forever.
+  if (response.status === 404 && data?.error === 'Session not found') {
+    try {
+      const restoreResponse = await fetch(serviceBase + '/sessions', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ sessionId: session.session_id }),
+      });
+      const restoreRaw = await restoreResponse.text();
+      let restoreData: any = null;
+      try { restoreData = restoreRaw ? JSON.parse(restoreRaw) : null; } catch {}
+      await supabase
+        .from('whatsapp_sessions')
+        .update({ status: 'disconnected', updated_at: new Date().toISOString() })
+        .eq('business_id', task.business_id)
+        .eq('session_id', session.session_id);
+      throw new Error('WhatsApp session was lost after the service restart. A new QR session was initialized; reconnect WhatsApp from the dashboard before automated follow-ups resume. ' + (restoreData?.error || ''));
+    } catch (recoveryError) {
+      if (recoveryError instanceof Error && recoveryError.message.startsWith('WhatsApp session was lost')) throw recoveryError;
+      throw new Error('WhatsApp session was lost after the service restart and could not be reinitialized: ' + (recoveryError instanceof Error ? recoveryError.message : String(recoveryError)));
+    }
+  }
+
   if (!response.ok || data?.success === false) throw new Error('WhatsApp agent rejected follow-up: ' + response.status + ' ' + (data?.error || data?.message || raw));
   return data || { success: true };
 }
