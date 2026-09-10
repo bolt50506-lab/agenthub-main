@@ -1,6 +1,8 @@
 name: Repair AI fallback delivery
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -25,17 +27,20 @@ jobs:
 
           old = "const DEFAULT_PROVIDER_TIMEOUT_MS = 15000;"
           new = "const DEFAULT_PROVIDER_TIMEOUT_MS = 6000;"
-          if old not in text:
-              raise SystemExit('Gemini/Groq timeout constant not found')
-          text = text.replace(old, new, 1)
+          if old in text:
+              text = text.replace(old, new, 1)
 
-          old_block = """  const errors: string[] = [];\n\n  for (\n    let index = 0;\n    index < providerConfigs.length;\n    index++\n  ) {\n    const config =\n      providerConfigs[index];"""
-
-          new_block = """  const errors: string[] = [];\n\n  // Hosted fallback safety net: if the dashboard only has Gemini enabled,\n  // still use Groq when its backend-only environment key is configured.\n  // This prevents a single slow Gemini request from becoming a customer-facing\n  // failure while keeping provider credentials out of the browser.\n  const effectiveProviderConfigs = [...providerConfigs];\n  if (\n    !effectiveProviderConfigs.some((config) => config.provider === 'groq') &&\n    getEnv('GROQ_API_KEY')\n  ) {\n    effectiveProviderConfigs.push({\n      provider: 'groq',\n      apiKey: getEnv('GROQ_API_KEY'),\n      model: getEnv('GROQ_MODEL') || 'openai/gpt-oss-120b',\n      temperature: request.temperature ?? 0.7,\n      maxTokens: request.maxTokens ?? 1024,\n    });\n  }\n\n  for (\n    let index = 0;\n    index < effectiveProviderConfigs.length;\n    index++\n  ) {\n    const config =\n      effectiveProviderConfigs[index];"""
+          old_block = """  const errors: string[];\n\n  for (\n    let index = 0;\n    index < providerConfigs.length;\n    index++\n  ) {\n    const config =\n      providerConfigs[index];"""
 
           if old_block not in text:
+              old_block = """  const errors: string[] = [];\n\n  for (\n    let index = 0;\n    index < providerConfigs.length;\n    index++\n  ) {\n    const config =\n      providerConfigs[index];"""
+
+          new_block = """  const errors: string[] = [];\n\n  // Hosted fallback safety net: if the dashboard only has Gemini enabled,\n  // still use Groq when its backend-only environment key is configured.\n  const effectiveProviderConfigs = [...providerConfigs];\n  if (\n    !effectiveProviderConfigs.some((config) => config.provider === 'groq') &&\n    getEnv('GROQ_API_KEY')\n  ) {\n    effectiveProviderConfigs.push({\n      provider: 'groq',\n      apiKey: getEnv('GROQ_API_KEY'),\n      model: getEnv('GROQ_MODEL') || 'openai/gpt-oss-120b',\n      temperature: request.temperature ?? 0.7,\n      maxTokens: request.maxTokens ?? 1024,\n    });\n  }\n\n  for (\n    let index = 0;\n    index < effectiveProviderConfigs.length;\n    index++\n  ) {\n    const config =\n      effectiveProviderConfigs[index];"""
+
+          if old_block in text:
+              text = text.replace(old_block, new_block, 1)
+          elif 'const effectiveProviderConfigs = [...providerConfigs];' not in text:
               raise SystemExit('Fallback loop block not found')
-          text = text.replace(old_block, new_block, 1)
 
           text = text.replace("    providerConfigs[\n      providerConfigs.length - 1\n    ];", "    effectiveProviderConfigs[\n      effectiveProviderConfigs.length - 1\n    ];", 1)
 
@@ -47,8 +52,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add lib/ai/providers.ts
-          git commit -m "fix: make Groq an automatic AI fallback" || exit 0
-          git push origin main
+          if git diff --cached --quiet; then
+            echo "No provider changes needed"
+          else
+            git commit -m "fix: make Groq an automatic AI fallback"
+            git push origin main
+          fi
 
       - name: Remove temporary workflow
         shell: bash
