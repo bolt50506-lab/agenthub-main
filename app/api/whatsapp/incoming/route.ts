@@ -95,6 +95,11 @@ export async function POST(req: NextRequest) {
     }
     const configuredMode = (whatsappIntegration?.config as Record<string, unknown> | null)?.voice_reply_mode;
     if (configuredMode === 'disabled' || configuredMode === 'text_only' || configuredMode === 'voice_only' || configuredMode === 'text_and_voice' || configuredMode === 'random') voiceReplyMode = configuredMode;
+    // Explicit voice/audio requests override the saved default for this reply only.
+    // This allows messages such as "reply in voice", "send voice note" and "awaaz mein jawab do"
+    // to receive a voice reply even when the business default is disabled.
+    const explicitVoiceRequest = /\b(voice|audio|voice note|voice message|send voice|reply in voice|speak|awaaz|awaz)\b/i.test(message) || /[آا]واز|آڈیو/.test(message);
+    if (explicitVoiceRequest) voiceReplyMode = 'voice_only';
     const voiceConfig = (whatsappIntegration?.config as Record<string, unknown> | null) ?? {};
     const voiceCloneFallbackEnabled = typeof voiceConfig.voice_clone_fallback_enabled === 'boolean' ? voiceConfig.voice_clone_fallback_enabled : true;
     const rawVoiceCloneFallbackTimeout = typeof voiceConfig.voice_clone_fallback_timeout_seconds === 'number' ? voiceConfig.voice_clone_fallback_timeout_seconds : 20;
@@ -188,9 +193,6 @@ export async function POST(req: NextRequest) {
 
     const { error: incomingMessageError } = await supabase.from('messages').insert({ business_id: businessId, conversation_id: conversation.id, sender_type: 'customer', sender_id: customer.id, content: message, content_type: 'text', is_inbound: true, metadata: { channel: 'whatsapp', whatsapp_id: from, whatsapp_message_id: whatsappMessageId, session_id: sessionId, input_type: inputType, ...(inputType === 'voice' ? { transcription_provider: transcriptionProvider, transcription_model: transcriptionModel } : {}) } });
     if (incomingMessageError) {
-      // The database has a unique inbound WhatsApp message id guard. A second
-      // concurrent webhook for the same message must stop here and must never
-      // continue into AI generation or delivery.
       if (whatsappMessageId && incomingMessageError.code === '23505') {
         console.log('[WhatsApp API] Duplicate inbound message claimed by another request:', whatsappMessageId);
         return NextResponse.json({ success: true, reply: null, ignored: true, reason: 'Duplicate message', conversation_id: conversation.id, customer_id: customer.id });
@@ -240,11 +242,8 @@ export async function POST(req: NextRequest) {
     const customerMemory = buildCustomerMemory(customer?.metadata, detectedMemoryLanguage, intent, message);
     await supabase.from('customers').update({ metadata: customerMemory }).eq('id', customer.id);
     customer.metadata = customerMemory;
-    // Keep the CRM pipeline live even when the AI is still formulating its reply.
     if (lead) {
-      const nextStatus = intent.buying || intent.conversion ? 'qualified'
-        : intent.hesitation ? 'contacted'
-        : lead.status || 'new';
+      const nextStatus = intent.buying || intent.conversion ? 'qualified' : intent.hesitation ? 'contacted' : lead.status || 'new';
       if (nextStatus !== lead.status) {
         const updates: Record<string, unknown> = { status: nextStatus };
         if (intent.buying && nextStatus !== 'won') updates.interested_product = lead.interested_product || null;
@@ -254,95 +253,37 @@ export async function POST(req: NextRequest) {
     }
     if (intent.human || intent.complaint) {
       await createBusinessNotifications(supabase, businessId, intent.complaint ? 'complaint' : 'human_takeover', intent.complaint ? 'Customer complaint requires attention' : 'Customer requested a human', message.slice(0, 500), { conversation_id: conversation.id, customer_id: customer.id, lead_id: lead?.id || null });
-      // Pause AI for this conversation; the existing dashboard resume flow can
-      // reactivate it after the human has handled the case.
-      await supabase.from('conversations').update({
-        human_takeover: true,
-        ai_enabled: false,
-        human_takeover_at: new Date().toISOString(),
-      }).eq('id', conversation.id);
-      return NextResponse.json({
-        success: true, reply: null, ignored: true, human_takeover: true,
-        reason: intent.complaint ? 'Complaint escalated to human' : 'Customer requested human assistance',
-        conversation_id: conversation.id, customer_id: customer.id
-      });
+      await supabase.from('conversations').update({ human_takeover: true, ai_enabled: false, human_takeover_at: new Date().toISOString() }).eq('id', conversation.id);
+      return NextResponse.json({ success: true, reply: null, ignored: true, human_takeover: true, reason: intent.complaint ? 'Complaint escalated to human' : 'Customer requested human assistance', conversation_id: conversation.id, customer_id: customer.id });
     }
 
     const customerLanguage = detectReplyLanguage(message);
     const languageInstruction = buildLanguageInstruction(message);
     console.log('[WhatsApp API] Detected customer language:', customerLanguage);
-    const systemPrompt = `You are the official WhatsApp assistant for ${business.name}.\n\nYou represent THIS business only.\n\nBUSINESS INFORMATION:\nBusiness Name: ${business.name}\nIndustry: ${business.industry || 'Not specified'}\nBusiness Description: ${business.description || 'Not specified'}\nWebsite: ${business.website || 'Not provided'}\nBusiness Phone: ${business.phone || 'Not provided'}\nBusiness Address: ${business.address || 'Not provided'}\n\nAGENT INFORMATION:\nAgent Purpose: ${agent?.purpose || 'Help customers and answer business questions'}\nAgent Description: ${agent?.description || 'Not provided'}\nCommunication Style: ${agent?.communication_style || 'Professional'}\nPrimary Goal: ${agent?.primary_goal || 'Help customers effectively'}\n\nAGENT SETTINGS:\nTone: ${agentSettings?.tone || 'professional'}\nResponse Language Setting: ${agentSettings?.response_language || 'English'}\nGreeting Behavior: ${agentSettings?.greeting_behavior || 'Natural'}\nCustom Instructions: ${agentSettings?.custom_instructions || 'None'}\n\nCUSTOM FIRST-CONTACT WELCOME:\n${welcomeMessage || 'No custom welcome message configured.'}\n\nBUSINESS PRODUCTS:\n${productsContext}\n\nBUSINESS SERVICES:\n${servicesContext}\n\nBUSINESS KNOWLEDGE:\n${knowledgeContext}\n\nLIVE SUBSCRIPTION PLANS AND PRICING:\n${subscriptionPlansContext}\n\nLANGUAGE OVERRIDE FOR THIS MESSAGE — HIGHEST PRIORITY:\n${languageInstruction}\nDetected customer language: ${customerLanguage}\nThe customer's current language overrides the dashboard/default response language. If the customer uses Roman Urdu, every normal customer-facing sentence must use Latin/English letters; do not answer in Urdu Arabic script. If the customer uses English, answer in English. If the customer uses Urdu script, answer in Urdu script. If mixed, naturally preserve the mix. Do not translate the customer's Roman Urdu into English-only.\n\nIMPORTANT RULES:\n- Represent ${business.name}, not AgentHub AI.\n- Never introduce yourself as AgentHub AI.\n- Never mention internal systems, APIs, AI providers, Gemini, Groq, Ollama, or databases.\n- Only use products, knowledge, prices and policies belonging to ${business.name}.\n- Never invent missing information or prices.\n- If an exact price is available, state it directly.\n- Be helpful, professional and natural.\n- Keep replies suitable for WhatsApp and avoid unnecessary long explanations.\n- Match the customer's language and conversational style.\n- Never claim an action was completed unless it actually happened.\n- When a customer clearly asks about or selects a listed product/service, the CRM may record an inquiry draft containing the exact item and price. Do not tell the customer an order is confirmed unless they explicitly confirm it.\n- For appointments, confirm the exact service, date and time before saying the booking is completed.\n- Do not restart an existing conversation with a generic greeting.\n- Never state, invent, or introduce yourself using an agent/person name. Never say \"I am [name]\", \"I'm [name]\", \"My name is [name]\", or equivalent Roman Urdu wording. Represent the business instead.\n- If a custom first-contact welcome message is configured, do not create a second greeting; answer the customer's message naturally after the welcome is added by the application.\n\nConversation behavior:\n- Match the customer's energy and pace.\n- Never repeat information already given unless asked.\n- SALES INTELLIGENCE: For genuine prospects, actively but respectfully explain relevant benefits, ROI and solutions. Do not give up after a mild objection; address the objection once with useful value, then respect a clear refusal.
-- If the customer expresses a price/budget objection, explain the most relevant benefit or alternative based only on available business information.
-- LEAD CAPTURE: When useful, naturally ask for missing contact or requirement details. Do not repeatedly ask for information already known.
-- FOLLOW-UP: If the customer explicitly says they will decide later or names a future time, keep the conversation open and allow follow-up automation to re-engage them.
-- ESCALATION: If the customer asks for a human or makes a serious complaint, AI escalation may take over; do not argue or pressure them.\n- Stay in character as one consistent assistant.\n- Use the recent message history to understand short replies and references.\n`.trim();
+    const systemPrompt = `You are the official WhatsApp assistant for ${business.name}.\n\nYou represent THIS business only.\n\nBUSINESS INFORMATION:\nBusiness Name: ${business.name}\nIndustry: ${business.industry || 'Not specified'}\nBusiness Description: ${business.description || 'Not specified'}\nWebsite: ${business.website || 'Not provided'}\nBusiness Phone: ${business.phone || 'Not provided'}\nBusiness Address: ${business.address || 'Not provided'}\n\nAGENT INFORMATION:\nAgent Purpose: ${agent?.purpose || 'Help customers and answer business questions'}\nAgent Description: ${agent?.description || 'Not provided'}\nCommunication Style: ${agent?.communication_style || 'Professional'}\nPrimary Goal: ${agent?.primary_goal || 'Help customers effectively'}\n\nAGENT SETTINGS:\nTone: ${agentSettings?.tone || 'professional'}\nResponse Language Setting: ${agentSettings?.response_language || 'English'}\nGreeting Behavior: ${agentSettings?.greeting_behavior || 'Natural'}\nCustom Instructions: ${agentSettings?.custom_instructions || 'None'}\n\nCUSTOM FIRST-CONTACT WELCOME:\n${welcomeMessage || 'No custom welcome message configured.'}\n\nBUSINESS PRODUCTS:\n${productsContext}\n\nBUSINESS SERVICES:\n${servicesContext}\n\nBUSINESS KNOWLEDGE:\n${knowledgeContext}\n\nLIVE SUBSCRIPTION PLANS AND PRICING:\n${subscriptionPlansContext}\n\nLANGUAGE OVERRIDE FOR THIS MESSAGE — HIGHEST PRIORITY:\n${languageInstruction}\nDetected customer language: ${customerLanguage}\nThe customer's current language overrides the dashboard/default response language. If the customer uses Roman Urdu, every normal customer-facing sentence must use Latin/English letters; do not answer in Urdu Arabic script. If the customer uses English, answer in English. If the customer uses Urdu script, answer in Urdu script. If mixed, naturally preserve the mix. Do not translate the customer's Roman Urdu into English-only.\n\nIMPORTANT RULES:\n- Represent ${business.name}, not AgentHub AI.\n- Never introduce yourself as AgentHub AI.\n- Never mention internal systems, APIs, AI providers, Gemini, Groq, Ollama, or databases.\n- Only use products, knowledge, prices and policies belonging to ${business.name}.\n- Never invent missing information or prices.\n- If an exact price is available, state it directly.\n- Be helpful, professional and natural.\n- Keep replies suitable for WhatsApp and avoid unnecessary long explanations.\n- Match the customer's language and conversational style.\n- Never claim an action was completed unless it actually happened.\n- When a customer clearly asks about or selects a listed product/service, the CRM may record an inquiry draft containing the exact item and price. Do not tell the customer an order is confirmed unless they explicitly confirm it.\n- For appointments, confirm the exact service, date and time before saying the booking is completed.\n- Do not restart an existing conversation with a generic greeting.\n- Never state, invent, or introduce yourself using an agent/person name. Never say \"I am [name]\", \"I'm [name]\", \"My name is [name]\", or equivalent Roman Urdu wording. Represent the business instead.\n- If a custom first-contact welcome message is configured, do not create a second greeting; answer the customer's message naturally after the welcome is added by the application.\n\nConversation behavior:\n- Match the customer's energy and pace.\n- Never repeat information already given unless asked.\n- SALES INTELLIGENCE: For genuine prospects, actively but respectfully explain relevant benefits, ROI and solutions. Do not give up after a mild objection; address the objection once with useful value, then respect a clear refusal.\n- If the customer expresses a price/budget objection, explain the most relevant benefit or alternative based only on available business information.\n- LEAD CAPTURE: When useful, naturally ask for missing contact or requirement details. Do not repeatedly ask for information already known.\n- FOLLOW-UP: If the customer explicitly says they will decide later or names a future time, keep the conversation open and allow follow-up automation to re-engage them.\n- ESCALATION: If the customer asks for a human or makes a serious complaint, AI escalation may take over; do not argue or pressure them.\n- Stay in character as one consistent assistant.\n- Use the recent message history to understand short replies and references.\n`.trim();
 
     const aiResponse = await generateAIResponseWithFallback({ messages: conversationHistory, systemPrompt, temperature: 0.7, maxTokens: 1024, businessId }, providerConfigs);
     if (aiResponse.error || !aiResponse.content?.trim()) return NextResponse.json({ success: false, reply: 'Sorry, I am temporarily unable to process your message. Please try again in a moment.', error: aiResponse.error || 'AI returned an empty response' }, { status: 503 });
 
     let finalReply = aiResponse.content.trim();
-
-    // Roman Urdu must never silently fall back to English-only. Use a strict
-    // formatting pass with examples, then validate the result and retry once
-    // if it still looks English-only.
     if (customerLanguage === 'roman_urdu') {
       const formatRomanUrdu = async (replyToFormat: string, strictRetry = false) => {
-        const prompt = strictRetry
-          ? `FINAL LANGUAGE CORRECTION REQUIRED. The text below is still English. Convert every normal sentence into natural Pakistani Roman Urdu NOW. Keep names, product names, prices, numbers and abbreviations unchanged. Roman Urdu uses Latin letters, not Urdu script. Example: "Sure! Here's a quick overview of our services." -> "Ji zaroor! Main aap ko hamari services ka mukhtasar overview bata deta hoon." Return only the corrected Roman Urdu customer reply.\\n\\nText: ${replyToFormat}`
-          : `Rewrite the following customer reply into natural Pakistani Roman Urdu. Keep the exact meaning, facts, prices, names and numbers. Use Latin letters for Urdu sentences. Do not use Urdu/Arabic script. Do not add information. Example: "We offer fast support and easy setup." -> "Hum fast support aur asaan setup provide karte hain." Return only the Roman Urdu customer reply.\\n\\nReply: ${replyToFormat}`;
-
-        return generateAIResponseWithFallback({
-          messages: [{ role: 'user', content: prompt }],
-          systemPrompt: 'STRICT OUTPUT FORMATTER: Roman Urdu only. English-only sentences are invalid output.',
-          temperature: 0.1,
-          maxTokens: 1024,
-          businessId
-        }, providerConfigs);
+        const prompt = strictRetry ? `FINAL LANGUAGE CORRECTION REQUIRED. The text below is still English. Convert every normal sentence into natural Pakistani Roman Urdu NOW. Keep names, product names, prices, numbers and abbreviations unchanged. Roman Urdu uses Latin letters, not Urdu Arabic script. Example: "Sure! Here's a quick overview of our services." -> "Ji zaroor! Main aap ko hamari services ka mukhtasar overview bata deta hoon." Return only the corrected Roman Urdu customer reply.\n\nText: ${replyToFormat}` : `Rewrite the following customer reply into natural Pakistani Roman Urdu. Keep the exact meaning, facts, prices, names and numbers. Use Latin letters for Urdu sentences. Do not use Urdu/Arabic script. Do not add information. Example: "We offer fast support and easy setup." -> "Hum fast support aur asaan setup provide karte hain." Return only the Roman Urdu customer reply.\n\nReply: ${replyToFormat}`;
+        return generateAIResponseWithFallback({ messages: [{ role: 'user', content: prompt }], systemPrompt: 'STRICT OUTPUT FORMATTER: Roman Urdu only. English-only sentences are invalid output.', temperature: 0.1, maxTokens: 1024, businessId }, providerConfigs);
       };
-
-      const romanMarkers = /\\b(aap|ap|mujhe|mujhy|ham|hum|hai|hain|ho|hain|ka|ki|ke|ko|se|mein|main|aur|bata|bta|chahiye|kar|karo|karein|karain|ji|zaroor|bilkul|yeh|ye|woh|wo|sari|sab|tamam)\\b/i;
-      const englishSignals = /\\b(the|here|sure|quick|friendly|overview|of|our|we|offer|and|with|you|your|this|that|services|service|available)\\b/gi;
-      const looksEnglishOnly = (value: string) => {
-        const englishCount = (value.match(englishSignals) || []).length;
-        return !romanMarkers.test(value) && englishCount >= 2;
-      };
-
+      const romanMarkers = /\b(aap|ap|mujhe|mujhy|ham|hum|hai|hain|ho|ka|ki|ke|ko|se|mein|main|aur|bata|bta|chahiye|kar|karo|karein|karain|ji|zaroor|bilkul|yeh|ye|woh|wo|sari|sab|tamam)\b/i;
+      const englishSignals = /\b(the|here|sure|quick|friendly|overview|of|our|we|offer|and|with|you|your|this|that|services|service|available)\b/gi;
+      const looksEnglishOnly = (value: string) => { const englishCount = (value.match(englishSignals) || []).length; return !romanMarkers.test(value) && englishCount >= 2; };
       const romanRewrite = await formatRomanUrdu(finalReply);
-      if (!romanRewrite.error && romanRewrite.content?.trim()) {
-        finalReply = romanRewrite.content.trim();
-      }
-
-      if (looksEnglishOnly(finalReply)) {
-        const retry = await formatRomanUrdu(finalReply, true);
-        if (!retry.error && retry.content?.trim()) {
-          finalReply = retry.content.trim();
-        }
-      }
-
-      console.log('[WhatsApp API] Roman Urdu output enforcement:', {
-        detected: customerLanguage,
-        stillLooksEnglishOnly: looksEnglishOnly(finalReply)
-      });
+      if (!romanRewrite.error && romanRewrite.content?.trim()) finalReply = romanRewrite.content.trim();
+      if (looksEnglishOnly(finalReply)) { const retry = await formatRomanUrdu(finalReply, true); if (!retry.error && retry.content?.trim()) finalReply = retry.content.trim(); }
+      console.log('[WhatsApp API] Roman Urdu output enforcement:', { detected: customerLanguage, stillLooksEnglishOnly: looksEnglishOnly(finalReply) });
     }
 
-    if (isFirstContact && welcomeMessage) {
-      finalReply = `${welcomeMessage}\n\n${finalReply}`.trim();
-    }
+    if (isFirstContact && welcomeMessage) finalReply = `${welcomeMessage}\n\n${finalReply}`.trim();
 
-    // Resolve Random at the source once per reply. Railway receives the final
-    // delivery decision instead of depending on another layer to interpret it.
-    // This is independent on every reply: voice can repeat, text can repeat,
-    // and there is no alternating sequence.
-    const resolvedVoiceReplyMode =
-      voiceReplyMode === 'random'
-        ? (Math.random() < 0.5 ? 'text_only' : 'voice_only')
-        : voiceReplyMode;
-
-    console.log('[WhatsApp API] Voice delivery mode:', {
-      configured: voiceReplyMode,
-      resolved: resolvedVoiceReplyMode,
-      random: voiceReplyMode === 'random'
-    });
+    const resolvedVoiceReplyMode = voiceReplyMode === 'random' ? (Math.random() < 0.5 ? 'text_only' : 'voice_only') : voiceReplyMode;
+    console.log('[WhatsApp API] Voice delivery mode:', { configured: voiceReplyMode, resolved: resolvedVoiceReplyMode, random: voiceReplyMode === 'random', explicitVoiceRequest });
 
     const normalizedCustomerMessage = String(message || '').toLowerCase();
     const asksAboutVoiceFeature = /\b(voice|audio|voice note|voice reply|voice message|text and voice|text voice)\b/i.test(normalizedCustomerMessage) && /\b(support|available|feature|reply|replies|message|messages|kar|karta|hota|hai|hain|can|does|do)\b/i.test(normalizedCustomerMessage);
@@ -350,10 +291,7 @@ export async function POST(req: NextRequest) {
     if (asksAboutVoiceFeature && replyDeniesVoiceFeature) finalReply = customerLanguage === 'roman_urdu' || customerLanguage === 'mixed' ? 'Ji haan, AgentHub WhatsApp AI mein voice replies available hain. Dashboard se aap Text only, Voice only, Text and Voice, ya Random reply mode select kar sakte hain.' : customerLanguage === 'urdu' ? 'جی ہاں، AgentHub WhatsApp AI میں وائس ریپلائز دستیاب ہیں۔ ڈیش بورڈ سے آپ Text only، Voice only، Text and Voice، یا Random reply mode منتخب کر سکتے ہیں۔' : 'Yes, AgentHub WhatsApp AI supports voice replies. From the dashboard you can choose Text only, Voice only, Text and Voice, or Random reply mode.';
 
     const { data: latestConversation } = await supabase.from('conversations').select('human_takeover, ai_enabled').eq('id', conversation.id).maybeSingle();
-    if (latestConversation?.human_takeover === true || latestConversation?.ai_enabled === false) {
-      console.log('[WhatsApp API] Human takeover/AI disabled during generation; suppressing AI reply:', conversation.id);
-      return NextResponse.json({ success: true, reply: null, ignored: true, human_takeover: latestConversation?.human_takeover === true, reason: 'Human takeover active during AI generation', conversation_id: conversation.id });
-    }
+    if (latestConversation?.human_takeover === true || latestConversation?.ai_enabled === false) return NextResponse.json({ success: true, reply: null, ignored: true, human_takeover: latestConversation?.human_takeover === true, reason: 'Human takeover active during AI generation', conversation_id: conversation.id });
 
     let voiceReply: string | null = null;
     if (resolvedVoiceReplyMode !== 'disabled' && resolvedVoiceReplyMode !== 'text_only') {
@@ -365,56 +303,31 @@ export async function POST(req: NextRequest) {
       } else voiceReply = finalReply;
     }
 
-    // Post-response pipeline intelligence: keep lead state and follow-up timing
-    // aligned with the latest customer intent.
-    if (lead && intent.buying && lead.status !== 'won') {
-      await createBusinessNotifications(supabase, businessId, 'hot_lead', 'Hot lead detected', (customer.name || lead.name || 'Customer') + ' is showing strong purchase intent.', { lead_id: lead.id, conversation_id: conversation.id, customer_id: customer.id });
-    }
+    if (lead && intent.buying && lead.status !== 'won') await createBusinessNotifications(supabase, businessId, 'hot_lead', 'Hot lead detected', (customer.name || lead.name || 'Customer') + ' is showing strong purchase intent.', { lead_id: lead.id, conversation_id: conversation.id, customer_id: customer.id });
     if (lead) {
       const followUpRequestedAt = intent.followup ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : null;
-      if (followUpRequestedAt && agentSettings?.auto_followups_enabled === true) {
-        await supabase.from('follow_up_tasks').update({ scheduled_at: followUpRequestedAt })
-          .eq('business_id', businessId).eq('lead_id', lead.id).eq('status', 'pending').eq('automation_generated', true);
-      }
-      console.log('[WhatsApp API] Pipeline intelligence', {
-        leadId: lead.id, status: lead.status, buying: intent.buying,
-        conversion: intent.conversion, followup: intent.followup, lowConfidence: intent.lowConfidence
-      });
+      if (followUpRequestedAt && agentSettings?.auto_followups_enabled === true) await supabase.from('follow_up_tasks').update({ scheduled_at: followUpRequestedAt }).eq('business_id', businessId).eq('lead_id', lead.id).eq('status', 'pending').eq('automation_generated', true);
+      console.log('[WhatsApp API] Pipeline intelligence', { leadId: lead.id, status: lead.status, buying: intent.buying, conversion: intent.conversion, followup: intent.followup, lowConfidence: intent.lowConfidence });
     }
 
     const { error: aiMessageError } = await supabase.from('messages').insert({ business_id: businessId, conversation_id: conversation.id, sender_type: 'agent', content: finalReply, content_type: 'text', is_inbound: false, metadata: { channel: 'whatsapp', provider: aiResponse.provider, model: aiResponse.model, detected_language: customerLanguage, voice_reply_mode: resolvedVoiceReplyMode, configured_voice_reply_mode: voiceReplyMode } });
     if (aiMessageError) console.error('[WhatsApp API] AI message save error:', aiMessageError);
     await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversation.id);
 
-    // Record the exact product/service the customer is asking about as a CRM
-    // inquiry. This does not mark it paid or delivered; it gives the business
-    // a measurable product/service interest record tied to the conversation.
     if (intent.buying && (products?.length || services?.length)) {
       const normalizedMessage = message.toLowerCase();
       const productMatch = (products || []).find((item: any) => normalizedMessage.includes(String(item.name || '').toLowerCase()));
       const serviceMatch = !productMatch ? (services || []).find((item: any) => normalizedMessage.includes(String(item.name || '').toLowerCase())) : null;
       const item: any = productMatch || serviceMatch;
       if (item) {
-        const { data: existingOrder } = await supabase.from('orders').select('id')
-          .eq('business_id', businessId).eq('conversation_id', conversation.id)
-          .in('status',['inquiry','quotation_sent','awaiting_payment']).order('created_at',{ascending:false}).limit(1).maybeSingle();
+        const { data: existingOrder } = await supabase.from('orders').select('id').eq('business_id', businessId).eq('conversation_id', conversation.id).in('status',['inquiry','quotation_sent','awaiting_payment']).order('created_at',{ascending:false}).limit(1).maybeSingle();
         let orderId = existingOrder?.id || null;
         if (!orderId) {
           const total = Number(item.price || 0);
           const orderNumber = 'AI-' + Date.now().toString().slice(-10);
-          const { data: createdOrder } = await supabase.from('orders').insert({
-            business_id: businessId, customer_id: customer.id, lead_id: lead?.id || null, conversation_id: conversation.id,
-            order_number: orderNumber, customer_name: customer.name || phone || pushName || 'Customer', customer_phone: phone || null,
-            channel: 'whatsapp', status: intent.conversion ? 'confirmed' : 'inquiry', currency: item.currency || 'PKR',
-            subtotal: total, total_amount: total, balance_due: total, payment_status: 'unpaid',
-            metadata: { auto_recorded: true, source_message_id: whatsappMessageId, item_type: productMatch ? 'product' : 'service' },
-          }).select('id').single();
+          const { data: createdOrder } = await supabase.from('orders').insert({ business_id: businessId, customer_id: customer.id, lead_id: lead?.id || null, conversation_id: conversation.id, order_number: orderNumber, customer_name: customer.name || phone || pushName || 'Customer', customer_phone: phone || null, channel: 'whatsapp', status: intent.conversion ? 'confirmed' : 'inquiry', currency: item.currency || 'PKR', subtotal: total, total_amount: total, balance_due: total, payment_status: 'unpaid', metadata: { auto_recorded: true, source_message_id: whatsappMessageId, item_type: productMatch ? 'product' : 'service' } }).select('id').single();
           orderId = createdOrder?.id || null;
-          if (orderId) await supabase.from('order_items').insert({
-            order_id: orderId, product_id: productMatch ? item.id : null, service_id: serviceMatch ? item.id : null,
-            item_name: item.name, item_type: productMatch ? 'product' : 'service', quantity: 1,
-            unit_price: Number(item.price || 0), total_price: Number(item.price || 0),
-          });
+          if (orderId) await supabase.from('order_items').insert({ order_id: orderId, product_id: productMatch ? item.id : null, service_id: serviceMatch ? item.id : null, item_name: item.name, item_type: productMatch ? 'product' : 'service', quantity: 1, unit_price: Number(item.price || 0), total_price: Number(item.price || 0) });
         }
       }
     }
