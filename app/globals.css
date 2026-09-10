@@ -60,9 +60,9 @@
     --chart-4: 0 72% 52%;
     --chart-5: 280 65% 60%;
     --success: 142 71% 45%;
-    --success-foreground: 0 0% 100%;
+    --success-foreground: 222 47% 8%;
     --warning: 38 92% 50%;
-    --warning-foreground: 0 0% 100%;
+    --warning-foreground: 222 47% 8%;
   }
 }
 
@@ -105,4 +105,26 @@
     background-color: hsl(var(--border));
     border-radius: 3px;
   }
+}
+
+/* AgentHub public landing page: keep the customer-facing sign-in CTA visible and readable. */
+main a[href="/login"] {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0.55rem 1rem;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 9999px;
+  background: rgba(255,255,255,.06);
+  color: #f8fafc !important;
+  line-height: 1;
+  text-decoration: none;
+  transition: background .2s ease, border-color .2s ease, transform .2s ease;
+}
+
+main a[href="/login"]:hover {
+  background: rgba(255,255,255,.12);
+  border-color: rgba(255,255,255,.28);
+  transform: translateY(-1px);
 }
