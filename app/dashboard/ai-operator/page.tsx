@@ -14,6 +14,7 @@ type Finding = { id:string; title:string; description:string; severity:'high'|'m
 type OperatorAction = { id:string; action_type:string; entity_type?:string; entity_id?:string; title:string; description?:string; status:string; risk_level:string; created_at:string; error_message?:string; result?:Record<string,unknown> };
 type Settings = { mode:'review'|'prepare'|'autonomous'; stale_lead_hours:number; quiet_conversation_hours:number; auto_followups:boolean; auto_payment_reminders:boolean; auto_appointment_recovery:boolean; inventory_alerts:boolean };
 type ScanData = { findings:Finding[]; recoveredPotential:number; scannedAt:string };
+type ToggleKey = 'auto_followups'|'auto_payment_reminders'|'auto_appointment_recovery'|'inventory_alerts';
 
 const money = (amount:number, currency='PKR') => new Intl.NumberFormat('en-PK',{style:'currency',currency,maximumFractionDigits:0}).format(amount);
 
@@ -75,6 +76,13 @@ export default function AIOperatorPage() {
   if (!activeBusiness) return <Card><CardContent className="py-12 text-center text-muted-foreground">Select a business to use the AI Business Operator.</CardContent></Card>;
   if (loading) return <div className="flex items-center gap-2 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin"/>Scanning your business...</div>;
 
+  const toggles: Array<{key:ToggleKey; label:string; value:boolean}> = [
+    {key:'auto_followups',label:'Lead recovery',value:Boolean(settings?.auto_followups)},
+    {key:'auto_payment_reminders',label:'Payment reminders',value:Boolean(settings?.auto_payment_reminders)},
+    {key:'auto_appointment_recovery',label:'Appointment recovery',value:Boolean(settings?.auto_appointment_recovery)},
+    {key:'inventory_alerts',label:'Inventory alerts',value:Boolean(settings?.inventory_alerts)},
+  ];
+
   return <div className="max-w-6xl space-y-6">
     <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
       <div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10"><Bot className="h-5 w-5 text-primary"/></div><div><h1 className="text-2xl font-bold">AI Business Operator</h1><p className="text-muted-foreground">Find daily business losses and turn them into controlled actions.</p></div></div>
@@ -84,7 +92,7 @@ export default function AIOperatorPage() {
     <Card className="border-primary/20 bg-primary/[0.03]"><CardContent className="p-5 space-y-5">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"><div className="flex items-start gap-3"><Sparkles className="mt-0.5 h-5 w-5 text-primary"/><div><p className="font-semibold">Operator control</p><p className="text-sm text-muted-foreground">Choose how much authority AgentHub has. Review only never executes. Prepare creates proposed actions. Autonomous executes only the action types you explicitly enable.</p></div></div><div className="flex gap-2">{(['review','prepare','autonomous'] as const).map(mode=><Button key={mode} size="sm" variant={settings?.mode===mode?'default':'outline'} onClick={()=>updateSettings({mode})}>{mode==='review'?'Review only':mode==='prepare'?'Prepare actions':'Autonomous'}</Button>)}</div></div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {[['auto_followups','Lead recovery',settings?.auto_followups],['auto_payment_reminders','Payment reminders',settings?.auto_payment_reminders],['auto_appointment_recovery','Appointment recovery',settings?.auto_appointment_recovery],['inventory_alerts','Inventory alerts',settings?.inventory_alerts]].map(([key,label,value])=><div key={key} className="flex items-center justify-between rounded-lg border bg-background/60 p-3"><span className="text-sm font-medium">{label}</span><Switch checked={Boolean(value)} onCheckedChange={checked=>updateSettings({[key]:checked} as Partial<Settings>)} disabled={settings?.mode==='review'}/></div>)}
+        {toggles.map(toggle=><div key={toggle.key} className="flex items-center justify-between rounded-lg border bg-background/60 p-3"><span className="text-sm font-medium">{toggle.label}</span><Switch checked={toggle.value} onCheckedChange={checked=>updateSettings({[toggle.key]:checked} as Partial<Settings>)} disabled={settings?.mode==='review'}/></div>)}
       </div>
       <div className="flex items-center gap-2 text-xs text-muted-foreground"><ShieldCheck className="h-4 w-4 text-primary"/>High-impact actions still require explicit approval; every Operator action is recorded.</div>
     </CardContent></Card>
