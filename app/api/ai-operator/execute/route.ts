@@ -56,6 +56,20 @@ async function queueFollowup(params: {
   scheduledAt?: string;
 }) {
   const { businessId, leadId, conversationId, appointmentId, message, taskType = 'follow_up', scheduledAt } = params;
+
+  // Validate the lead before inserting. Missing phone numbers are a permanent
+  // skip, not an operator failure, because WhatsApp cannot deliver without one.
+  const { data: lead, error: leadError } = await supabase
+    .from('leads')
+    .select('id,phone,status')
+    .eq('id', leadId)
+    .eq('business_id', businessId)
+    .maybeSingle();
+  if (leadError) throw new Error(leadError.message);
+  if (!lead) return { skipped: true, reason: 'lead_not_found' };
+  if (!text(lead.phone)) return { skipped: true, reason: 'lead_has_no_phone' };
+  if (['won', 'lost'].includes(String(lead.status))) return { skipped: true, reason: 'lead_closed' };
+
   let existingQuery = supabase
     .from('follow_up_tasks')
     .select('id')
@@ -147,8 +161,11 @@ async function autoDiscover(businessId: string, limit: number) {
 
   if (settings.auto_followups) {
     for (const c of conversations || []) {
+      // This action creates a WhatsApp follow-up, so only discover WhatsApp
+      // conversations with a real lead phone number.
+      if (String(c.channel || '').toLowerCase() !== 'whatsapp') continue;
       const { data: lead } = await supabase.from('leads').select('id,name,phone,conversation_id,status').eq('business_id', businessId).eq('conversation_id', c.id).limit(1).maybeSingle();
-      if (!lead || ['won', 'lost'].includes(String(lead.status))) continue;
+      if (!lead || !text(lead.phone) || ['won', 'lost'].includes(String(lead.status))) continue;
       actions.push({
         business_id: businessId,
         action_type: 'recover_conversation',
@@ -298,8 +315,8 @@ export async function POST(request: NextRequest) {
         const leadId = text(payload.lead_id) || claimed.entity_id;
         const { data: lead } = await supabase.from('leads').select('id,name,phone,conversation_id,status').eq('id', leadId).eq('business_id', bid).maybeSingle();
         if (!lead) throw new Error('Lead for conversation recovery no longer exists');
-        if (['won', 'lost'].includes(String(lead.status))) throw new Error('Lead is already closed');
-        result = await queueFollowup({ businessId: bid, leadId: lead.id, conversationId: lead.conversation_id || (claimed.entity_type === 'conversation' ? claimed.entity_id : null), message: text(payload.message, `Hi ${lead.name || ''}! Just checking in — is there anything else I can help you with? 😊`) });
+        if (['won', 'lost'].includes(String(lead.status))) result = { skipped: true, reason: 'lead_closed' };
+        else result = await queueFollowup({ businessId: bid, leadId: lead.id, conversationId: lead.conversation_id || (claimed.entity_type === 'conversation' ? claimed.entity_id : null), message: text(payload.message, `Hi ${lead.name || ''}! Just checking in — is there anything else I can help you with? 😊`) });
       } else if (type === 'capture_lead') {
         const { data: conversation } = await supabase.from('conversations').select('id,customer_id,channel').eq('id', claimed.entity_id).eq('business_id', bid).maybeSingle();
         if (!conversation?.customer_id) throw new Error('Conversation has no customer');
