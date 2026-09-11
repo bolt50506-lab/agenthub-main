@@ -15,6 +15,7 @@ const siteName = 'AgentHub AI';
 const siteDescription =
   'Automate WhatsApp, Instagram, Facebook and website chat with AI. Capture leads, book appointments, answer customers and follow up 24/7.';
 const siteTitle = 'AI Business Automation for WhatsApp & Pakistan | AgentHub AI';
+const logoUrl = `${siteUrl}/agenthub-logo.svg`;
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -37,7 +38,7 @@ export const metadata: Metadata = {
       'max-video-preview': -1,
     },
   },
-  icons: { icon: '/agenthub-logo.svg', shortcut: '/agenthub-logo.svg', apple: '/agenthub-logo.svg' },
+  icons: { icon: logoUrl, shortcut: logoUrl, apple: logoUrl },
   openGraph: {
     type: 'website',
     url: siteUrl,
@@ -60,15 +61,26 @@ export const metadata: Metadata = {
   },
 };
 
+const organizationId = `${siteUrl}/#organization`;
+const websiteId = `${siteUrl}/#website`;
+const softwareId = `${siteUrl}/#software`;
+
 const structuredData = {
   '@context': 'https://schema.org',
   '@graph': [
     {
       '@type': 'Organization',
-      '@id': `${siteUrl}/#organization`,
+      '@id': organizationId,
       name: siteName,
       url: siteUrl,
-      logo: `${siteUrl}/agenthub-logo.svg`,
+      logo: {
+        '@type': 'ImageObject',
+        '@id': `${siteUrl}/#logo`,
+        url: logoUrl,
+        contentUrl: logoUrl,
+        caption: siteName,
+      },
+      image: { '@id': `${siteUrl}/#logo` },
       areaServed: [
         { '@type': 'Country', name: 'Pakistan' },
         { '@type': 'City', name: 'Islamabad' },
@@ -86,21 +98,21 @@ const structuredData = {
     },
     {
       '@type': 'WebSite',
-      '@id': `${siteUrl}/#website`,
+      '@id': websiteId,
       name: siteName,
       url: siteUrl,
       inLanguage: 'en-PK',
-      publisher: { '@id': `${siteUrl}/#organization` },
+      publisher: { '@id': organizationId },
     },
     {
       '@type': 'SoftwareApplication',
-      '@id': `${siteUrl}/#software`,
+      '@id': softwareId,
       name: siteName,
       applicationCategory: 'BusinessApplication',
       operatingSystem: 'Web',
       url: siteUrl,
       description: siteDescription,
-      publisher: { '@id': `${siteUrl}/#organization` },
+      publisher: { '@id': organizationId },
       featureList: [
         'AI customer support',
         'WhatsApp business automation',
