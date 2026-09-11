@@ -1,5 +1,7 @@
 import Link from 'next/link';
 
+type Industry = 'pharmacies' | 'clinics' | 'real-estate' | 'restaurants' | 'ecommerce' | 'salons' | 'education';
+
 const industries = [
   ['Pharmacies', '/ai-for-pharmacies'],
   ['Clinics', '/ai-for-clinics'],
@@ -10,14 +12,53 @@ const industries = [
   ['Education', '/ai-for-education'],
 ] as const;
 
-const faqs = [
-  ['Can AgentHub AI work on WhatsApp?', 'Yes. AgentHub AI is designed to automate business conversations on WhatsApp and can also support website chat and other connected channels.'],
-  ['Can businesses control what the AI says?', 'Yes. Businesses can provide approved business information, products, pricing and workflow rules, with human escalation for requests that need staff.'],
-  ['Can AgentHub AI capture leads and follow up?', 'Yes. It can capture customer enquiries and use follow-up automation to re-engage eligible leads when conversations become inactive.'],
-  ['Can customers be handed to a human?', 'Yes. Human handoff can be used when a conversation is sensitive, complex or outside the AI agent’s approved scope.'],
-];
+const faqSets: Record<Industry, [string, string][]> = {
+  pharmacies: [
+    ['Can an AI agent answer pharmacy product questions on WhatsApp?', 'Yes. AgentHub AI can answer routine product and pricing enquiries using the pharmacy information and catalogue you approve.'],
+    ['Can pharmacy staff control medical or prescription conversations?', 'Yes. Safe escalation rules can route prescription, clinical or uncertain questions to qualified staff instead of allowing the AI to make unsupported decisions.'],
+    ['Can AgentHub AI follow up with pharmacy customers?', 'Yes. Eligible inactive enquiries can enter automated follow-up workflows so potential customers are not forgotten.'],
+    ['Can a pharmacy hand a WhatsApp conversation to a human?', 'Yes. Staff can take over conversations that are sensitive, complex or outside the configured AI scope.'],
+  ],
+  clinics: [
+    ['Can an AI agent handle clinic appointment enquiries?', 'Yes. AgentHub AI can handle routine appointment questions and guide patients through configured booking workflows.'],
+    ['Can clinics use AI for patient support on WhatsApp?', 'Yes. Clinics can use approved information to answer routine service, timing and appointment questions while escalating sensitive matters.'],
+    ['Can clinic staff control what the AI answers?', 'Yes. Approved business information and escalation rules can define the agent’s scope and when staff should take over.'],
+    ['Can AgentHub AI follow up with patients or enquiries?', 'Yes. Eligible inactive enquiries can trigger automated follow-up workflows configured by the business.'],
+  ],
+  'real-estate': [
+    ['Can an AI agent qualify property leads?', 'Yes. AgentHub AI can collect configured lead details, answer property enquiries from approved information and help move prospects toward the next step.'],
+    ['Can real-estate businesses respond to WhatsApp enquiries 24/7?', 'Yes. The AI agent can handle routine property questions outside office hours and escalate conversations when human input is needed.'],
+    ['Can AgentHub AI follow up with property prospects?', 'Yes. Inactive eligible leads can enter automated follow-up workflows to keep enquiries moving.'],
+    ['Can agents take over a property conversation?', 'Yes. Human handoff can be used for negotiations, complex requirements, sensitive questions or any request outside the configured scope.'],
+  ],
+  restaurants: [
+    ['Can an AI agent answer restaurant enquiries on WhatsApp?', 'Yes. AgentHub AI can answer approved questions about menus, services, timings and other business information.'],
+    ['Can restaurants automate customer follow-up?', 'Yes. Eligible inactive enquiries can trigger configured follow-up workflows without requiring staff to manually chase every conversation.'],
+    ['Can restaurant staff control the AI information?', 'Yes. Businesses can provide approved menu, pricing, service and policy information for the agent to use.'],
+    ['Can a restaurant hand customers to staff?', 'Yes. Human handoff can be used whenever a request is complex, sensitive or requires staff involvement.'],
+  ],
+  ecommerce: [
+    ['Can an AI agent answer e-commerce product questions?', 'Yes. AgentHub AI can use approved catalogue and business information to answer routine product and purchasing enquiries.'],
+    ['Can AgentHub AI help recover interested shoppers?', 'Yes. Eligible inactive conversations can enter automated follow-up workflows to re-engage potential customers.'],
+    ['Can e-commerce teams control product and pricing answers?', 'Yes. Businesses can configure approved information and workflow rules so the AI stays within the intended scope.'],
+    ['Can shoppers be transferred to a human?', 'Yes. Human handoff can be used for complex orders, exceptions, complaints or requests that require staff.'],
+  ],
+  salons: [
+    ['Can an AI agent handle salon appointment enquiries?', 'Yes. AgentHub AI can answer routine service and appointment questions and guide customers through configured booking workflows.'],
+    ['Can salons automate WhatsApp customer support?', 'Yes. The agent can respond to routine enquiries using approved salon information and escalate conversations when needed.'],
+    ['Can AgentHub AI follow up with customers who do not book?', 'Yes. Eligible inactive enquiries can trigger automated follow-up workflows to encourage customers to continue the conversation.'],
+    ['Can salon staff take over a customer chat?', 'Yes. Staff can handle conversations that require personal advice, exceptions or human judgment.'],
+  ],
+  education: [
+    ['Can an AI agent answer education enquiries?', 'Yes. AgentHub AI can answer routine questions about approved courses, services, schedules and admissions information.'],
+    ['Can education businesses capture and follow up with prospective students?', 'Yes. The agent can capture enquiries and eligible inactive leads can enter automated follow-up workflows.'],
+    ['Can schools or institutes control the AI information?', 'Yes. Businesses can define approved information and escalation rules so the agent stays within the intended scope.'],
+    ['Can admissions staff take over conversations?', 'Yes. Human handoff can be used when a prospective student needs detailed guidance or a staff member needs to intervene.'],
+  ],
+};
 
-export default function IndustrySeoFooter() {
+export default function IndustrySeoFooter({ industry }: { industry: Industry }) {
+  const faqs = faqSets[industry];
   const schema = {
     '@context': 'https://schema.org',
     '@type': 'FAQPage',
