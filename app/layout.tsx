@@ -5,6 +5,7 @@ import { ThemeProvider } from '@/components/theme-provider';
 import { AuthProvider } from '@/lib/auth-context';
 import { Toaster } from '@/components/ui/toaster';
 import { TrialCta } from '@/components/trial-cta';
+import { WebsiteContentHydrator } from '@/components/website-content-hydrator';
 import { Analytics } from '@vercel/analytics/next';
 
 const inter = Inter({ subsets: ['latin'] });
@@ -41,7 +42,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" suppressHydrationWarning>
       <head><script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }} /></head>
       <body className={inter.className}>
-        <ThemeProvider><AuthProvider>{children}<TrialCta /><Toaster /></AuthProvider></ThemeProvider>
+        <ThemeProvider><AuthProvider><WebsiteContentHydrator />{children}<TrialCta /><Toaster /></AuthProvider></ThemeProvider>
         <Analytics />
       </body>
     </html>
