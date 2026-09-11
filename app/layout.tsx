@@ -63,7 +63,9 @@ const structuredData = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <head><script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }} /></head>
+      <head>
+        <link rel="preload" href="/landing-hero.svg?v=bright-agenthub-2" as="image" type="image/svg+xml" fetchPriority="high" />
+      </head>
       <body className={inter.className}>
         <ThemeProvider><AuthProvider><WebsiteContentHydrator />{children}<TrialCta /><Toaster /></AuthProvider></ThemeProvider>
         <Analytics />
