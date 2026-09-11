@@ -21,6 +21,9 @@ export const metadata: Metadata = {
   description: siteDescription,
   applicationName: siteName,
   generator: 'Next.js',
+  verification: {
+    google: 'gFr_sUdOBbwfiqrGLY8xah9PUMyqJ3fmocxvaDahkaU',
+  },
   alternates: { canonical: '/' },
   robots: { index: true, follow: true, googleBot: { index: true, follow: true, 'max-image-preview': 'large', 'max-snippet': -1, 'max-video-preview': -1 } },
   icons: { icon: '/agenthub-logo.svg', shortcut: '/agenthub-logo.svg', apple: '/agenthub-logo.svg' },
