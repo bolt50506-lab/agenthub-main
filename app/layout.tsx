@@ -22,7 +22,7 @@ export const metadata: Metadata = {
   applicationName: siteName,
   generator: 'Next.js',
   verification: {
-    google: 'gFr_sUdOBbwfiqrGLY8xah9PUMyqJ3fmocxvaDahkaU',
+    google: 'OGikM_zAaECLMGL5rnTB-vfs0OuSPjJRdJsVdwFBRqI',
   },
   alternates: { canonical: '/' },
   robots: { index: true, follow: true, googleBot: { index: true, follow: true, 'max-image-preview': 'large', 'max-snippet': -1, 'max-video-preview': -1 } },
