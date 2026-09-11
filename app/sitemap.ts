@@ -4,13 +4,26 @@ const siteUrl = 'https://agenthubai.vercel.app';
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const now = new Date();
+  const publicPages = [
+    { path: '', priority: 1 },
+    { path: '/seo/whatsapp-ai-agent', priority: 0.9 },
+    { path: '/seo/ai-customer-support', priority: 0.9 },
+    { path: '/seo/lead-follow-up-automation', priority: 0.9 },
+    { path: '/seo/ai-appointment-booking', priority: 0.9 },
+  ];
 
   return [
-    { url: siteUrl, lastModified: now, changeFrequency: 'weekly', priority: 1 },
-    { url: `${siteUrl}/whatsapp-ai-agent`, lastModified: now, changeFrequency: 'weekly', priority: 0.9 },
-    { url: `${siteUrl}/ai-customer-support`, lastModified: now, changeFrequency: 'weekly', priority: 0.9 },
-    { url: `${siteUrl}/lead-follow-up-automation`, lastModified: now, changeFrequency: 'weekly', priority: 0.9 },
-    { url: `${siteUrl}/ai-appointment-booking`, lastModified: now, changeFrequency: 'weekly', priority: 0.9 },
-    { url: `${siteUrl}/login`, lastModified: now, changeFrequency: 'monthly', priority: 0.3 },
+    ...publicPages.map(({ path, priority }) => ({
+      url: `${siteUrl}${path}`,
+      lastModified: now,
+      changeFrequency: 'weekly' as const,
+      priority,
+    })),
+    {
+      url: `${siteUrl}/login`,
+      lastModified: now,
+      changeFrequency: 'monthly' as const,
+      priority: 0.3,
+    },
   ];
 }
