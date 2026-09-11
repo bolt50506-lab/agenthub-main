@@ -16,6 +16,10 @@ export function ArticleSchema({ title, description, url }: ArticleSchemaProps) {
       '@type': 'Organization',
       name: 'AgentHub AI',
       url: 'https://agenthubai.vercel.app',
+      logo: {
+        '@type': 'ImageObject',
+        url: 'https://agenthubai.vercel.app/agenthub-logo.svg',
+      },
     },
     publisher: {
       '@type': 'Organization',
