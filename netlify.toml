@@ -1,3 +1,7 @@
 [build]
 command = "npx next build"
 publish = ".next"
+
+[build.environment]
+NEXT_PUBLIC_SUPABASE_URL = "https://xzfxlwltnpdlnjtdjwsg.supabase.co"
+NEXT_PUBLIC_SUPABASE_ANON_KEY = "sb_publishable_wneb8yDgeIHsk2LNa6aGXg_YTL7askO"
