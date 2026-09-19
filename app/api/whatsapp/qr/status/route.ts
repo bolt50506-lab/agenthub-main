@@ -3,6 +3,9 @@ import { createServiceClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
+const WHATSAPP_SERVICE_SECRET =
+  process.env.WHATSAPP_SERVICE_SECRET || process.env.AGENTHUB_WEBHOOK_SECRET || '';
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
