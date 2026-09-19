@@ -106,12 +106,34 @@ export async function POST(req: NextRequest) {
     let voiceReplyMode: 'disabled' | 'text_only' | 'voice_only' | 'text_and_voice' | 'random' = 'text_and_voice';
     let whatsappIntegration: { id?: string; config: unknown } | null = null;
     if (whatsappSession.integration_id) {
-      const { data } = await supabase.from('integrations').select('id, config').eq('id', whatsappSession.integration_id).maybeSingle();
+      const { data } = await supabase
+        .from('integrations')
+        .select('id, config, status')
+        .eq('id', whatsappSession.integration_id)
+        .maybeSingle();
       whatsappIntegration = data;
     }
     if (!whatsappIntegration) {
-      const { data } = await supabase.from('integrations').select('id, config').eq('business_id', businessId).eq('type', 'whatsapp').order('updated_at', { ascending: false }).limit(1).maybeSingle();
+      const { data } = await supabase
+        .from('integrations')
+        .select('id, config, status')
+        .eq('business_id', businessId)
+        .eq('type', 'whatsapp')
+        .eq('status', 'connected')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
       whatsappIntegration = data;
+    }
+    // Channel targeting: a paused/error WhatsApp integration must not continue
+    // answering messages just because a session record still exists.
+    if (whatsappIntegration && (whatsappIntegration as any).status && (whatsappIntegration as any).status !== 'connected') {
+      return NextResponse.json({
+        success: true,
+        ignored: true,
+        reply: null,
+        reason: 'WhatsApp channel is not active',
+      });
     }
     const configuredMode = (whatsappIntegration?.config as Record<string, unknown> | null)?.voice_reply_mode;
     if (configuredMode === 'disabled' || configuredMode === 'text_only' || configuredMode === 'voice_only' || configuredMode === 'text_and_voice' || configuredMode === 'random') voiceReplyMode = configuredMode;
@@ -150,14 +172,38 @@ export async function POST(req: NextRequest) {
     }
 
     stage = 'agent_lookup';
-    const { data: agent } = await supabase.from('agents').select('id, business_id, name, purpose, description, communication_style, primary_goal, supported_languages, status, ai_provider, knowledge_source_ids, enabled_capabilities').eq('business_id', businessId).eq('status', 'active').limit(1).maybeSingle();
+    // Resolve group rules before the agent so a rule can explicitly target
+    // one active agent instead of whichever active agent happens to be first.
     let groupRule: any = null;
     if (isGroup) {
-      const { data: groupRules } = await supabase.from('group_rules').select('id, business_id, agent_id, group_ai_enabled, response_mode, allowed_category_ids, allowed_product_ids, allow_price_list, allow_quotation, require_product_name, response_language, max_response_length, custom_rules').eq('business_id', businessId).maybeSingle();
+      const { data: groupRules } = await supabase
+        .from('group_rules')
+        .select('id, business_id, agent_id, group_ai_enabled, response_mode, allowed_category_ids, allowed_product_ids, allow_price_list, allow_quotation, require_product_name, response_language, max_response_length, custom_rules')
+        .eq('business_id', businessId)
+        .maybeSingle();
       groupRule = groupRules;
       if (!groupRule) return NextResponse.json({ success: true, ignored: true, reply: null, reason: 'No group rule configured' });
       const groupDecision = shouldReplyInGroup(groupRule, message);
       if (!groupDecision.shouldReply) return NextResponse.json({ success: true, ignored: true, reply: null, reason: groupDecision.reason });
+    }
+
+    const agentQuery = supabase
+      .from('agents')
+      .select('id, business_id, name, purpose, description, communication_style, primary_goal, supported_languages, status, ai_provider, knowledge_source_ids, enabled_capabilities')
+      .eq('business_id', businessId)
+      .eq('status', 'active');
+
+    const { data: agent } = await (isGroup && groupRule?.agent_id
+      ? agentQuery.eq('id', groupRule.agent_id).maybeSingle()
+      : agentQuery.limit(1).maybeSingle());
+
+    if (isGroup && groupRule?.agent_id && !agent) {
+      return NextResponse.json({
+        success: true,
+        ignored: true,
+        reply: null,
+        reason: 'Targeted group agent is not active',
+      });
     }
 
     stage = 'catalog_lookup';
@@ -178,7 +224,7 @@ export async function POST(req: NextRequest) {
       const { data: providerRows } = await supabase.from('ai_provider_configs').select('provider, api_key_encrypted, base_url, model, priority').eq('is_enabled', true).order('priority', { ascending: true });
       if (!providerRows?.length) return NextResponse.json({ success: true, reply: null, error: 'No enabled AI provider is available' });
       const providerConfigs: ProviderConfig[] = providerRows.map((row) => ({ provider: row.provider, apiKey: row.api_key_encrypted || undefined, apiUrl: row.base_url || undefined, model: row.model, temperature: 0.7, maxTokens: 1024 }));
-      const groupSystemPrompt = `You are the WhatsApp group assistant for ${business.name}.\n\nBusiness information:\nBusiness Name: ${business.name}\nIndustry: ${business.industry || 'Not specified'}\nDescription: ${business.description || 'Not specified'}\n\nIMPORTANT GROUP RULES:\n- You are responding inside a WhatsApp group.\n- Only answer according to the configured group rules.\n- Do not respond to unrelated messages.\n- Keep replies concise.\n- Do not mention AgentHub, APIs, providers, databases or internal systems.\n\nResponse Mode:\n${groupRule?.response_mode || 'restricted'}\nRequire Product Name: ${groupRule?.require_product_name ? 'YES' : 'NO'}\nAllow Price List: ${groupRule?.allow_price_list ? 'YES' : 'NO'}\nAllow Quotation: ${groupRule?.allow_quotation ? 'YES' : 'NO'}\nAllowed Products:\n${productContext}\nCustom Group Rules:\n${JSON.stringify(groupRule?.custom_rules || [])}\n\nLANGUAGE: ${buildLanguageInstruction(message)}`;
+      const groupSystemPrompt = `You are the WhatsApp group assistant for ${business.name}.\n\nBusiness information:\nBusiness Name: ${business.name}\nIndustry: ${business.industry || 'Not specified'}\nDescription: ${business.description || 'Not specified'}\n\nIMPORTANT GROUP RULES:\n- You are responding inside a WhatsApp group.\n- Only answer according to the configured group rules.\n- Do not respond to unrelated messages.\n- Keep replies concise.\n- Do not mention AgentHub, APIs, providers, databases or internal systems.\n\nResponse Mode:\n${groupRule?.response_mode || 'restricted'}\nRequire Product Name: ${groupRule?.require_product_name ? 'YES' : 'NO'}\nAllow Price List: ${groupRule?.allow_price_list ? 'YES' : 'NO'}\nAllow Quotation: ${groupRule?.allow_quotation ? 'YES' : 'NO'}\nAllowed Products:\n${productContext}\nCustom Group Rules:\n${JSON.stringify(groupRule?.custom_rules || [])}\n\nENFORCEMENT:\n- If Allow Price List is NO, do not provide a price list or multiple prices; answer the question without exposing restricted pricing.\n- If Allow Quotation is NO, do not generate or offer a quotation.\n- If Require Product Name is YES, only answer product-specific questions when a product name is present.\n- Never invent products, prices, quotations, or policies.\n\nLANGUAGE: ${buildLanguageInstruction(message)}`;
       stage = 'ai_generation';
     const aiResponse = await generateAIResponseWithFallback({ messages: [{ role: 'user', content: message }], systemPrompt: groupSystemPrompt, temperature: 0.7, maxTokens: 1024, businessId }, providerConfigs);
       if (aiResponse.error || !aiResponse.content?.trim()) return NextResponse.json({ success: true, reply: null, error: aiResponse.error });
