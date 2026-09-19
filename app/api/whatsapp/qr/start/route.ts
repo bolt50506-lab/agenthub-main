@@ -3,6 +3,9 @@ import { createServiceClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
+const WHATSAPP_SERVICE_SECRET =
+  process.env.WHATSAPP_SERVICE_SECRET || process.env.AGENTHUB_WEBHOOK_SECRET || '';
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -49,7 +52,7 @@ export async function POST(req: NextRequest) {
       try {
         const liveCheck = await fetch(
           `${serviceUrl}/sessions/${encodeURIComponent(existing.session_id)}`,
-          { method: 'GET', cache: 'no-store' }
+          { method: 'GET', cache: 'no-store', headers: WHATSAPP_SERVICE_SECRET ? { Authorization: `Bearer ${WHATSAPP_SERVICE_SECRET}` } : {} }
         );
 
         if (liveCheck.ok) {
@@ -72,7 +75,7 @@ export async function POST(req: NextRequest) {
       try {
         await fetch(
           `${serviceUrl}/sessions/${encodeURIComponent(existing.session_id)}`,
-          { method: 'DELETE', cache: 'no-store' }
+          { method: 'DELETE', cache: 'no-store', headers: WHATSAPP_SERVICE_SECRET ? { Authorization: `Bearer ${WHATSAPP_SERVICE_SECRET}` } : {} }
         );
       } catch {
         // Best effort only. The service may already have forgotten the session.
@@ -134,7 +137,10 @@ export async function POST(req: NextRequest) {
 
     const serviceRes = await fetch(`${serviceUrl}/sessions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+            'Content-Type': 'application/json',
+            ...(WHATSAPP_SERVICE_SECRET ? { Authorization: `Bearer ${WHATSAPP_SERVICE_SECRET}` } : {}),
+          },
       body: JSON.stringify({ sessionId: baileysSessionId }),
       cache: 'no-store',
     });
