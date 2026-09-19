@@ -79,3 +79,34 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ok:false,stage,error:error instanceof Error?error.message:String(error),stack:error instanceof Error?error.stack:null},{status:500});
   }
 }
+
+// TEMP: unauthenticated diagnostic GET for deployment debugging. Remove after diagnosis.
+export async function GET() {
+  const sessionId = 'wa_11f62525-3c27-474d-854e-e474c7211d43_1789809996938_i7ek71bl';
+  let stage = 'start';
+  try {
+    const supabase = createServiceClient();
+    stage='session_lookup';
+    const {data:session,error}=await supabase.from('whatsapp_sessions').select('id,business_id,integration_id,session_id').eq('session_id',sessionId).maybeSingle();
+    if(error) throw new Error(error.message); if(!session) throw new Error('session not found');
+    const businessId=session.business_id;
+    stage='integration_lookup';
+    const {error:ie}=await supabase.from('integrations').select('id,config').eq('business_id',businessId).eq('type','whatsapp').order('updated_at',{ascending:false}).limit(1).maybeSingle(); if(ie) throw new Error(ie.message);
+    stage='business_lookup';
+    const {error:be}=await supabase.from('businesses').select('id,name,industry,description,website,phone,address,timezone,working_hours,welcome_message').eq('id',businessId).maybeSingle(); if(be) throw new Error(be.message);
+    stage='voice_profile_lookup';
+    const {error:ve}=await supabase.from('voice_profiles').select('id').eq('business_id',businessId).eq('is_default',true).eq('status','active').maybeSingle(); if(ve) throw new Error(ve.message);
+    stage='agent_lookup';
+    const {data:agent,error:ae}=await supabase.from('agents').select('id,business_id,name,purpose,description,communication_style,primary_goal,supported_languages,status,ai_provider,knowledge_source_ids,enabled_capabilities').eq('business_id',businessId).eq('status','active').limit(1).maybeSingle(); if(ae) throw new Error(ae.message);
+    stage='agent_settings_lookup';
+    if(agent){const {error:e}=await supabase.from('agent_settings').select('id,agent_id,business_id,tone,greeting_behavior,auto_create_leads,appointments_enabled,auto_followups_enabled,max_response_length,response_language,custom_instructions').eq('business_id',businessId).eq('agent_id',agent.id).maybeSingle(); if(e) throw new Error(e.message);}
+    stage='products_lookup'; const {error:pe}=await supabase.from('products').select('id').eq('business_id',businessId).eq('status','active').limit(100); if(pe) throw new Error(pe.message);
+    stage='services_lookup'; const {error:se}=await supabase.from('services').select('id').eq('business_id',businessId).eq('status','active').limit(100); if(se) throw new Error(se.message);
+    stage='knowledge_lookup'; const {error:ke}=await supabase.from('knowledge_items').select('id').eq('business_id',businessId).eq('status','active').limit(50); if(ke) throw new Error(ke.message);
+    stage='plans_lookup'; const {error:ple}=await supabase.from('subscription_plans').select('name').eq('is_active',true).order('sort_order',{ascending:true}); if(ple) throw new Error(ple.message);
+    stage='provider_lookup'; const {data:rows,error:pre}=await supabase.from('ai_provider_configs').select('provider,api_key_encrypted,base_url,model,priority').eq('is_enabled',true).order('priority',{ascending:true}); if(pre) throw new Error(pre.message); if(!rows?.length) throw new Error('No enabled AI provider');
+    const configs:ProviderConfig[]=rows.map(row=>({provider:row.provider,apiKey:row.api_key_encrypted||undefined,apiUrl:row.base_url||undefined,model:row.model,temperature:.2,maxTokens:30}));
+    stage='ai_test'; const ai=await generateAIResponseWithFallback({messages:[{role:'user',content:'hi'}],systemPrompt:'Reply with one short friendly sentence.',temperature:.2,maxTokens:30,businessId},configs); if(ai.error) throw new Error(ai.error);
+    return NextResponse.json({ok:true,stage:'complete'});
+  } catch(error){ return NextResponse.json({ok:false,stage,error:error instanceof Error?error.message:String(error)},{status:500}); }
+}
