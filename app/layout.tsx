@@ -6,11 +6,9 @@ import { AuthProvider } from '@/lib/auth-context';
 import { Toaster } from '@/components/ui/toaster';
 import { TrialCta } from '@/components/trial-cta';
 import { WebsiteContentHydrator } from '@/components/website-content-hydrator';
-import { Analytics } from '@vercel/analytics/next';
-
 const inter = Inter({ subsets: ['latin'] });
 
-const siteUrl = 'https://agenthubai.vercel.app';
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://agenthubai.netlify.app';
 const siteName = 'AgentHub AI';
 const siteDescription =
   'Automate WhatsApp, Instagram, Facebook and website chat with AI. Capture leads, book appointments, answer customers and follow up 24/7.';
@@ -137,7 +135,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className={inter.className}>
         <ThemeProvider><AuthProvider><WebsiteContentHydrator />{children}<TrialCta /><Toaster /></AuthProvider></ThemeProvider>
-        <Analytics />
       </body>
     </html>
   );
