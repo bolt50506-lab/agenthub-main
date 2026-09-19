@@ -34,6 +34,7 @@ function authorized(request: NextRequest) {
     process.env.AI_OPERATOR_CRON_SECRET,
     process.env.FOLLOWUP_CRON_SECRET,
     process.env.AGENTHUB_WEBHOOK_SECRET,
+    process.env.WHATSAPP_SERVICE_SECRET,
     process.env.CRON_SECRET,
   ].filter(Boolean) as string[];
 
