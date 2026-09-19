@@ -503,10 +503,11 @@ class GroqProvider
             request.temperature ??
             config.temperature ??
             0.7,
-          max_tokens:
+          max_completion_tokens:
             request.maxTokens ??
             config.maxTokens ??
             1024,
+          reasoning_effort: 'low',
         }),
       });
 
@@ -549,12 +550,17 @@ class GroqProvider
           : '';
 
       if (!content) {
+        const finishReason =
+          typeof firstChoice?.finish_reason === 'string'
+            ? firstChoice.finish_reason
+            : '';
         return {
           content: '',
           provider,
           model,
           error:
-            'Groq returned an empty response.',
+            'Groq returned an empty response.' +
+            (finishReason ? ' Finish reason: ' + finishReason + '.' : ''),
         };
       }
 
