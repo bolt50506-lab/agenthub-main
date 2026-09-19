@@ -62,7 +62,23 @@ export async function POST(req: NextRequest) {
     }
 
     stage = 'parse_request';
-    const body = await req.json();
+    const rawBody = await req.text();
+    console.log('[WhatsApp API] Request body diagnostics:', {
+      bytes: new TextEncoder().encode(rawBody).length,
+      contentType: req.headers.get('content-type'),
+      contentLength: req.headers.get('content-length'),
+      transferEncoding: req.headers.get('transfer-encoding'),
+    });
+    if (!rawBody || !rawBody.trim()) {
+      throw new Error('Empty request body');
+    }
+
+    let body: any;
+    try {
+      body = JSON.parse(rawBody);
+    } catch (parseError) {
+      throw new Error(`Invalid JSON body: ${parseError instanceof Error ? parseError.message : 'Unknown JSON parse error'}`);
+    }
     const sessionId = typeof body.session_id === 'string' ? body.session_id.trim() : '';
     const from = typeof body.from === 'string' ? body.from.trim() : '';
     const message = typeof body.message === 'string' ? body.message.trim() : '';
