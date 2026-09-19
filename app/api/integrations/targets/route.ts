@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, createServiceClient } from '@/lib/supabase/server';
 export const dynamic = 'force-dynamic';
-const WHATSAPP_SERVICE_URL = process.env.WHATSAPP_SERVICE_URL || 'https://agenthub-whatsapp-service-production.up.railway.app';
+const WHATSAPP_SERVICE_URL = (process.env.WHATSAPP_QR_SERVICE_URL || process.env.WHATSAPP_SERVICE_URL || 'http://localhost:3001').replace(/\/$/, '');
 const WHATSAPP_SECRET = process.env.AGENTHUB_WEBHOOK_SECRET || process.env.WHATSAPP_WEBHOOK_SECRET || '';
 type Channel = 'whatsapp' | 'facebook_messenger' | 'instagram';
 type Target = { id: string; name: string; username?: string | null; type: 'group' | 'page' | 'instagram'; page_id?: string | null; access_token?: string | null };
