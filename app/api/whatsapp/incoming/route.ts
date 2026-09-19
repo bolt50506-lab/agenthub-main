@@ -54,12 +54,14 @@ function limitText(text: string, maxLength?: number | null) {
 }
 
 export async function POST(req: NextRequest) {
+  let stage = 'start';
   try {
     const expectedSecret = process.env.AGENTHUB_WEBHOOK_SECRET || '';
     if (expectedSecret && req.headers.get('authorization') !== `Bearer ${expectedSecret}`) {
       return NextResponse.json({ success: false, reply: null, error: 'Unauthorized' }, { status: 401 });
     }
 
+    stage = 'parse_request';
     const body = await req.json();
     const sessionId = typeof body.session_id === 'string' ? body.session_id.trim() : '';
     const from = typeof body.from === 'string' ? body.from.trim() : '';
@@ -76,6 +78,7 @@ export async function POST(req: NextRequest) {
     if (!from) return NextResponse.json({ success: false, reply: null, error: 'Missing sender' }, { status: 400 });
     if (!message) return NextResponse.json({ success: false, reply: null, error: 'Missing message' }, { status: 400 });
 
+    stage = 'session_lookup';
     const supabase = createServiceClient();
     const { data: whatsappSession, error: sessionError } = await supabase.from('whatsapp_sessions').select('id, business_id, integration_id, session_id').eq('session_id', sessionId).maybeSingle();
     if (sessionError) return NextResponse.json({ success: false, reply: null, error: sessionError.message }, { status: 500 });
@@ -83,6 +86,7 @@ export async function POST(req: NextRequest) {
     const businessId = whatsappSession.business_id;
     if (!businessId) return NextResponse.json({ success: false, reply: null, error: 'WhatsApp session is not connected to a business' }, { status: 500 });
 
+    stage = 'integration_lookup';
     let voiceReplyMode: 'disabled' | 'text_only' | 'voice_only' | 'text_and_voice' | 'random' = 'text_and_voice';
     let whatsappIntegration: { id?: string; config: unknown } | null = null;
     if (whatsappSession.integration_id) {
@@ -105,17 +109,20 @@ export async function POST(req: NextRequest) {
     const rawVoiceCloneFallbackTimeout = typeof voiceConfig.voice_clone_fallback_timeout_seconds === 'number' ? voiceConfig.voice_clone_fallback_timeout_seconds : 20;
     const voiceCloneFallbackTimeoutSeconds = Math.min(60, Math.max(5, Math.round(rawVoiceCloneFallbackTimeout)));
 
+    stage = 'business_lookup';
     const { data: business, error: businessError } = await supabase.from('businesses').select('id, name, industry, description, website, phone, address, timezone, working_hours, welcome_message').eq('id', businessId).maybeSingle();
     if (businessError) return NextResponse.json({ success: false, reply: null, error: businessError.message }, { status: 500 });
     if (!business) return NextResponse.json({ success: false, reply: null, error: 'Business not found' }, { status: 404 });
     const { data: defaultVoiceProfile } = await supabase.from('voice_profiles').select('id').eq('business_id', businessId).eq('is_default', true).eq('status', 'active').maybeSingle();
     const voiceCloneEnabled = !!defaultVoiceProfile?.id;
 
+    stage = 'duplicate_check';
     if (whatsappMessageId) {
       const { data: duplicateMessage } = await supabase.from('messages').select('id').eq('business_id', businessId).eq('metadata->>whatsapp_message_id', whatsappMessageId).limit(1).maybeSingle();
       if (duplicateMessage) return NextResponse.json({ success: true, reply: null, ignored: true, reason: 'Duplicate message' });
     }
 
+    stage = 'lead_followup_cancel';
     const isGroup = isWhatsAppGroup(from);
     if (!isGroup) {
       const incomingPhone = resolvePhoneNumber(from, phoneNumberFromBody);
@@ -126,6 +133,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    stage = 'agent_lookup';
     const { data: agent } = await supabase.from('agents').select('id, business_id, name, purpose, description, communication_style, primary_goal, supported_languages, status, ai_provider, knowledge_source_ids, enabled_capabilities').eq('business_id', businessId).eq('status', 'active').limit(1).maybeSingle();
     let groupRule: any = null;
     if (isGroup) {
@@ -136,6 +144,7 @@ export async function POST(req: NextRequest) {
       if (!groupDecision.shouldReply) return NextResponse.json({ success: true, ignored: true, reply: null, reason: groupDecision.reason });
     }
 
+    stage = 'catalog_lookup';
     let agentSettings: any = null;
     if (agent) {
       const { data: settings } = await supabase.from('agent_settings').select('id, agent_id, business_id, tone, greeting_behavior, auto_create_leads, appointments_enabled, auto_followups_enabled, max_response_length, response_language, custom_instructions').eq('business_id', businessId).eq('agent_id', agent.id).maybeSingle();
@@ -154,11 +163,13 @@ export async function POST(req: NextRequest) {
       if (!providerRows?.length) return NextResponse.json({ success: true, reply: null, error: 'No enabled AI provider is available' });
       const providerConfigs: ProviderConfig[] = providerRows.map((row) => ({ provider: row.provider, apiKey: row.api_key_encrypted || undefined, apiUrl: row.base_url || undefined, model: row.model, temperature: 0.7, maxTokens: 1024 }));
       const groupSystemPrompt = `You are the WhatsApp group assistant for ${business.name}.\n\nBusiness information:\nBusiness Name: ${business.name}\nIndustry: ${business.industry || 'Not specified'}\nDescription: ${business.description || 'Not specified'}\n\nIMPORTANT GROUP RULES:\n- You are responding inside a WhatsApp group.\n- Only answer according to the configured group rules.\n- Do not respond to unrelated messages.\n- Keep replies concise.\n- Do not mention AgentHub, APIs, providers, databases or internal systems.\n\nResponse Mode:\n${groupRule?.response_mode || 'restricted'}\nRequire Product Name: ${groupRule?.require_product_name ? 'YES' : 'NO'}\nAllow Price List: ${groupRule?.allow_price_list ? 'YES' : 'NO'}\nAllow Quotation: ${groupRule?.allow_quotation ? 'YES' : 'NO'}\nAllowed Products:\n${productContext}\nCustom Group Rules:\n${JSON.stringify(groupRule?.custom_rules || [])}\n\nLANGUAGE: ${buildLanguageInstruction(message)}`;
-      const aiResponse = await generateAIResponseWithFallback({ messages: [{ role: 'user', content: message }], systemPrompt: groupSystemPrompt, temperature: 0.7, maxTokens: 1024, businessId }, providerConfigs);
+      stage = 'ai_generation';
+    const aiResponse = await generateAIResponseWithFallback({ messages: [{ role: 'user', content: message }], systemPrompt: groupSystemPrompt, temperature: 0.7, maxTokens: 1024, businessId }, providerConfigs);
       if (aiResponse.error || !aiResponse.content?.trim()) return NextResponse.json({ success: true, reply: null, error: aiResponse.error });
       return NextResponse.json({ success: true, reply: limitText(aiResponse.content.trim(), groupRule?.max_response_length), provider: aiResponse.provider, model: aiResponse.model, detected_language: detectReplyLanguage(message) });
     }
 
+    stage = 'customer_lookup';
     const phone = resolvePhoneNumber(from, phoneNumberFromBody);
     let customer: any = null;
     const { data: existingCustomer } = await supabase.from('customers').select('id, business_id, name, phone, email, external_id, metadata').eq('business_id', businessId).eq('external_id', from).maybeSingle();
@@ -178,6 +189,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    stage = 'conversation_lookup';
     let conversation: any = null;
     const { data: existingConversation } = await supabase.from('conversations').select('id, business_id, agent_id, customer_id, type, title, external_id, channel, ai_enabled, status, human_takeover, human_takeover_at, human_takeover_by, ai_resume_at').eq('business_id', businessId).eq('external_id', from).eq('channel', 'whatsapp').maybeSingle();
     const isFirstContact = !existingConversation;
@@ -191,6 +203,7 @@ export async function POST(req: NextRequest) {
       await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversation.id);
     }
 
+    stage = 'incoming_message_insert';
     const { error: incomingMessageError } = await supabase.from('messages').insert({ business_id: businessId, conversation_id: conversation.id, sender_type: 'customer', sender_id: customer.id, content: message, content_type: 'text', is_inbound: true, metadata: { channel: 'whatsapp', whatsapp_id: from, whatsapp_message_id: whatsappMessageId, session_id: sessionId, input_type: inputType, ...(inputType === 'voice' ? { transcription_provider: transcriptionProvider, transcription_model: transcriptionModel } : {}) } });
     if (incomingMessageError) {
       if (whatsappMessageId && incomingMessageError.code === '23505') {
@@ -206,6 +219,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, reply: null, ignored: true, human_takeover: true, reason: 'Human takeover active', conversation_id: conversation.id, customer_id: customer.id });
     }
 
+    stage = 'history_and_lead';
     const HISTORY_LIMIT = 16;
     const { data: historyRows } = await supabase.from('messages').select('sender_type, content, created_at').eq('conversation_id', conversation.id).order('created_at', { ascending: false }).limit(HISTORY_LIMIT);
     const conversationHistory = (historyRows || []).reverse().filter((row) => row.content && row.content.trim()).map((row) => ({ role: (row.sender_type === 'agent' || row.sender_type === 'business' ? 'assistant' : 'user') as 'user' | 'assistant', content: row.content }));
@@ -227,6 +241,7 @@ export async function POST(req: NextRequest) {
       else await supabase.from('follow_up_tasks').insert({ business_id: businessId, lead_id: lead.id, task_type: 'message', scheduled_at: followUpAt, status: 'pending', notes: 'auto:lead-checkin' });
     }
 
+    stage = 'provider_lookup';
     const { data: providerRows, error: providerError } = await supabase.from('ai_provider_configs').select('id, provider, api_key_encrypted, base_url, model, priority, is_enabled, is_primary, display_name').eq('is_enabled', true).order('priority', { ascending: true });
     if (providerError) return NextResponse.json({ success: false, reply: 'Sorry, I am temporarily unavailable. Please try again shortly.', error: providerError.message }, { status: 500 });
     if (!providerRows?.length) return NextResponse.json({ success: false, reply: 'Sorry, I am temporarily unavailable. Please try again shortly.', error: 'No AI providers are enabled' }, { status: 503 });
@@ -237,6 +252,7 @@ export async function POST(req: NextRequest) {
     const productsContext = products?.length ? products.map((product) => `Product: ${product.name}\nDescription: ${product.description || 'No description provided'}\nExact Price: ${product.price != null ? `${product.price} ${product.currency || ''}` : 'Not provided'}\nAvailability: ${product.availability || 'Not provided'}`).join('\n\n') : 'No products have been added yet.';
     const subscriptionPlansContext = subscriptionPlans?.length ? subscriptionPlans.map((plan) => { const currentPrice = typeof plan.price_cents === 'number' ? `${(plan.price_cents / 100).toFixed(2)} ${plan.currency || ''}` : 'Not provided'; const yearlyPrice = typeof plan.yearly_price_cents === 'number' ? `${(plan.yearly_price_cents / 100).toFixed(2)} ${plan.currency || ''}` : 'Not provided'; const features = Array.isArray(plan.features) && plan.features.length ? plan.features.join(', ') : 'No feature list provided'; return `Plan: ${plan.name}\nDescription: ${plan.description || 'Not provided'}\nExact ${plan.billing_period || 'monthly'} Price: ${currentPrice}\nExact Yearly Price: ${yearlyPrice}\nFeatures: ${features}`; }).join('\n\n---\n\n') : 'No subscription plans are available.';
 
+    stage = 'memory_and_intent';
     const intent = analyzeCustomerIntent(message);
     const detectedMemoryLanguage = detectReplyLanguage(message);
     const customerMemory = buildCustomerMemory(customer?.metadata, detectedMemoryLanguage, intent, message);
@@ -266,6 +282,7 @@ export async function POST(req: NextRequest) {
     if (aiResponse.error || !aiResponse.content?.trim()) return NextResponse.json({ success: false, reply: 'Sorry, I am temporarily unable to process your message. Please try again in a moment.', error: aiResponse.error || 'AI returned an empty response' }, { status: 503 });
 
     let finalReply = aiResponse.content.trim();
+    stage = 'roman_urdu_formatting';
     if (customerLanguage === 'roman_urdu') {
       const formatRomanUrdu = async (replyToFormat: string, strictRetry = false) => {
         const prompt = strictRetry ? `FINAL LANGUAGE CORRECTION REQUIRED. The text below is still English. Convert every normal sentence into natural Pakistani Roman Urdu NOW. Keep names, product names, prices, numbers and abbreviations unchanged. Roman Urdu uses Latin letters, not Urdu Arabic script. Example: "Sure! Here's a quick overview of our services." -> "Ji zaroor! Main aap ko hamari services ka mukhtasar overview bata deta hoon." Return only the corrected Roman Urdu customer reply.\n\nText: ${replyToFormat}` : `Rewrite the following customer reply into natural Pakistani Roman Urdu. Keep the exact meaning, facts, prices, names and numbers. Use Latin letters for Urdu sentences. Do not use Urdu/Arabic script. Do not add information. Example: "We offer fast support and easy setup." -> "Hum fast support aur asaan setup provide karte hain." Return only the Roman Urdu customer reply.\n\nReply: ${replyToFormat}`;
@@ -282,6 +299,7 @@ export async function POST(req: NextRequest) {
 
     if (isFirstContact && welcomeMessage) finalReply = `${welcomeMessage}\n\n${finalReply}`.trim();
 
+    stage = 'voice_preparation';
     const resolvedVoiceReplyMode = voiceReplyMode === 'random' ? (Math.random() < 0.5 ? 'text_only' : 'voice_only') : voiceReplyMode;
     console.log('[WhatsApp API] Voice delivery mode:', { configured: voiceReplyMode, resolved: resolvedVoiceReplyMode, random: voiceReplyMode === 'random', explicitVoiceRequest });
 
@@ -310,10 +328,12 @@ export async function POST(req: NextRequest) {
       console.log('[WhatsApp API] Pipeline intelligence', { leadId: lead.id, status: lead.status, buying: intent.buying, conversion: intent.conversion, followup: intent.followup, lowConfidence: intent.lowConfidence });
     }
 
+    stage = 'assistant_message_insert';
     const { error: aiMessageError } = await supabase.from('messages').insert({ business_id: businessId, conversation_id: conversation.id, sender_type: 'agent', content: finalReply, content_type: 'text', is_inbound: false, metadata: { channel: 'whatsapp', provider: aiResponse.provider, model: aiResponse.model, detected_language: customerLanguage, voice_reply_mode: resolvedVoiceReplyMode, configured_voice_reply_mode: voiceReplyMode } });
     if (aiMessageError) console.error('[WhatsApp API] AI message save error:', aiMessageError);
     await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversation.id);
 
+    stage = 'order_processing';
     if (intent.buying && (products?.length || services?.length)) {
       const normalizedMessage = message.toLowerCase();
       const productMatch = (products || []).find((item: any) => normalizedMessage.includes(String(item.name || '').toLowerCase()));
@@ -332,6 +352,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    stage = 'appointment_processing';
     let bookedAppointmentId: string | null = null;
     if (agentSettings?.appointments_enabled === true) {
       const detected = await detectAppointmentRequest(message, finalReply, business.address || '', providerConfigs);
@@ -350,9 +371,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    stage = 'complete_response';
     return NextResponse.json({ success: true, reply: finalReply, voice_reply: voiceReply, voice_reply_mode: resolvedVoiceReplyMode, configured_voice_reply_mode: voiceReplyMode, voice_clone_enabled: voiceCloneEnabled, voice_clone_fallback_enabled: voiceCloneFallbackEnabled, voice_clone_fallback_timeout_seconds: voiceCloneFallbackTimeoutSeconds, voice_profile_id: defaultVoiceProfile?.id || null, provider: aiResponse.provider, model: aiResponse.model, appointment_id: bookedAppointmentId, detected_language: customerLanguage, business: { id: business.id, name: business.name }, customer_id: customer.id, conversation_id: conversation.id, lead_id: lead?.id || null });
   } catch (error) {
-    console.error('[WhatsApp API] Unexpected error:', error);
-    return NextResponse.json({ success: false, reply: 'Sorry, something went wrong while processing your message.', error: error instanceof Error ? error.message : 'Unknown error' }, { status: 500 });
+    console.error('[WhatsApp API] Unexpected error at stage:', stage, error);
+    return NextResponse.json({ success: false, reply: 'Sorry, something went wrong while processing your message.', error: error instanceof Error ? `${stage}: ${error.message}` : `${stage}: Unknown error` }, { status: 500 });
   }
 }
