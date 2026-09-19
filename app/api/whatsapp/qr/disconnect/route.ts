@@ -107,6 +107,9 @@ export async function POST(req: NextRequest) {
           {
             method: 'DELETE',
             cache: 'no-store',
+            headers: WHATSAPP_SERVICE_SECRET
+              ? { Authorization: `Bearer ${WHATSAPP_SERVICE_SECRET}` }
+              : {},
           }
         );
 
