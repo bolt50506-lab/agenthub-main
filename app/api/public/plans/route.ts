@@ -1,11 +1,14 @@
 import { NextResponse } from 'next/server';
-import { createServiceClient } from '@/lib/supabase/server';
+import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const supabase = createServiceClient();
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+    if (!url || !anonKey) throw new Error('Supabase public environment variables are not configured');
+    const supabase = createClient(url, anonKey);
     const { data, error } = await supabase
       .from('subscription_plans')
       .select('*')
