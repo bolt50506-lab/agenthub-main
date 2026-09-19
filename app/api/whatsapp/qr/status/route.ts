@@ -127,6 +127,9 @@ export async function POST(req: NextRequest) {
       {
         method: 'GET',
         cache: 'no-store',
+        headers: WHATSAPP_SERVICE_SECRET
+          ? { Authorization: `Bearer ${WHATSAPP_SERVICE_SECRET}` }
+          : {},
       }
     );
 
