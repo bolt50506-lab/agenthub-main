@@ -30,6 +30,7 @@ export default function DashboardOverview() {
   const { activeBusiness } = useAuth();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!activeBusiness) return;
@@ -48,6 +49,14 @@ export default function DashboardOverview() {
         supabase.from('agents').select('id, name, status, purpose').eq('business_id', bizId),
         supabase.from('activity_logs').select('id, action, entity_type, created_at').eq('business_id', bizId).order('created_at', { ascending: false }).limit(8),
       ]);
+
+      const firstError = [recentLeadsResult, totalLeadsResult, newLeadsResult, convertedResult, recentConversionsResult, appointmentsResult, appointmentCountResult, followUps, agents, activities].find((result) => result.error)?.error;
+      if (firstError) {
+        console.error('[Dashboard] Data load failed:', firstError.message);
+        setLoadError(firstError.message);
+      } else {
+        setLoadError(null);
+      }
 
       const totalLeads = totalLeadsResult.count ?? 0;
       const convertedCustomers = convertedResult.count ?? 0;
@@ -91,6 +100,8 @@ export default function DashboardOverview() {
 
   return (
     <div className="space-y-6">
+      {loadError && <Card className="border-destructive/30 bg-destructive/5"><CardContent className="py-3 text-sm text-destructive">Some dashboard data could not be loaded: {loadError}. The workspace/session may need to be refreshed.</CardContent></Card>}
+
       <section className="relative overflow-hidden rounded-3xl border bg-gradient-to-br from-primary/15 via-background to-background p-6 sm:p-8">
         <div className="relative flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
           <div>
