@@ -388,6 +388,21 @@ export async function POST(req: NextRequest, { params }: { params: { type: strin
   if (!type) return json({ error: 'Unsupported Meta channel' }, 404);
   try {
     const body = await req.json();
+    const entries = Array.isArray(body?.entry) ? body.entry : [];
+    const eventCount = entries.reduce((count: number, entry: any) => {
+      const messaging = Array.isArray(entry?.messaging) ? entry.messaging.length : 0;
+      const changes = Array.isArray(entry?.changes) ? entry.changes.reduce((n: number, change: any) => n + (Array.isArray(change?.value?.messages) ? change.value.messages.length : 0), 0) : 0;
+      return count + messaging + changes;
+    }, 0);
+    const payloadKeys = Object.keys(body || {}).slice(0, 20);
+    const { error: debugError } = await createServiceClient().from('webhook_debug_events').insert({
+      channel: type,
+      object_type: typeof body?.object === 'string' ? body.object : null,
+      entry_count: entries.length,
+      event_count: eventCount,
+      payload_keys: payloadKeys,
+    });
+    if (debugError) console.error('Webhook diagnostic insert failed:', debugError.message);
     await processWebhook(type, body);
     return json({ ok: true });
   } catch (error) {
