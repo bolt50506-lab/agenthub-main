@@ -21,6 +21,24 @@ function isDomainAllowed(refererHost: string, config: Record<string, unknown>): 
   return allowedHosts.some((h) => refererHost === h || refererHost.endsWith('.' + h));
 }
 
+async function hasActiveSubscription(supabase: any, businessId: string) {
+  const { data: business } = await supabase.from('businesses').select('is_platform_business').eq('id', businessId).maybeSingle();
+  if (business?.is_platform_business) return true;
+  const { data: sub } = await supabase.from('business_subscriptions').select('status,end_date,overdue_grace_ends_at').eq('business_id', businessId).order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (!sub) return false;
+  const now = Date.now();
+  return ((sub.status === 'active' || sub.status === 'trial') && (!sub.end_date || new Date(sub.end_date).getTime() > now))
+    || (sub.status === 'overdue' && sub.overdue_grace_ends_at && new Date(sub.overdue_grace_ends_at).getTime() > now);
+}
+
+function inferWidgetPurpose(text: string) {
+  if (/(appointment|book|booking|schedule|meeting|visit|slot|time)/i.test(text)) return 'Booking';
+  if (/(follow.?up|remind|reminder|still interested|checking back)/i.test(text)) return 'Follow-up';
+  if (/(buy|purchase|price|pricing|cost|plan|subscribe|subscription|order|quote|discount|deal|package)/i.test(text)) return 'Sales';
+  if (/(help|problem|issue|error|not working|support|refund|complaint)/i.test(text)) return 'Support';
+  return null;
+}
+
 function normalizeMessage(value: string): string {
   return value.trim().replace(/\s+/g, ' ').toLowerCase();
 }
@@ -108,6 +126,7 @@ export async function POST(req: NextRequest) {
   }
 
   const supabase = createServiceClient();
+  if (!(await hasActiveSubscription(supabase, business_id))) return NextResponse.json({ error: 'Subscription inactive or expired' }, { status: 402, headers: CORS });
   const referer = req.headers.get('referer') || req.headers.get('origin') || '';
   let refererHost = '';
   try { refererHost = new URL(referer).hostname; } catch {}
@@ -164,14 +183,14 @@ export async function POST(req: NextRequest) {
   }
 
   if (!conversationId) {
-    const { data: agent } = await supabase
-      .from('agents')
-      .select('id')
-      .eq('business_id', business_id)
-      .eq('status', 'active')
-      .order('created_at', { ascending: true })
-      .limit(1)
-      .maybeSingle();
+    const preferredPurpose = inferWidgetPurpose(cleanMessage);
+    let { data: agent } = preferredPurpose
+      ? await supabase.from('agents').select('id').eq('business_id', business_id).eq('status', 'active').eq('purpose', preferredPurpose).order('created_at', { ascending: true }).limit(1).maybeSingle()
+      : { data: null };
+    if (!agent) {
+      const fallback = await supabase.from('agents').select('id').eq('business_id', business_id).eq('status', 'active').order('created_at', { ascending: true }).limit(1).maybeSingle();
+      agent = fallback.data;
+    }
 
     const { data: newConv, error } = await supabase
       .from('conversations')
@@ -315,6 +334,9 @@ export async function POST(req: NextRequest) {
     await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversationId);
     return NextResponse.json({ session_id: conversationId, visitor_id: customerId, reply: '', mode: 'human' }, { headers: CORS });
   }
+
+  const { data: aiLimit } = await supabase.rpc('check_plan_limit', { p_business_id: business_id, p_limit_type: 'max_ai_usage_per_month' });
+  if (!aiLimit?.allowed) return NextResponse.json({ error: 'AI usage limit reached for this plan' }, { status: 429, headers: CORS });
 
   let reply = '';
 
