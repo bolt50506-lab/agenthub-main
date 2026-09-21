@@ -156,7 +156,7 @@ async function processWebhook(type: Channel, body: any) {
     const customerExternal = externalId;
     let { data: customer } = await supabase.from('customers').select('id,name,phone').eq('business_id', businessId).eq('external_id', customerExternal).limit(1).maybeSingle();
     if (!customer) {
-      const createdCustomer = await supabase.from('customers').insert({ business_id: businessId, name: (type === 'instagram' ? 'Instagram ' : 'Facebook ') + sender, external_id: customerExternal, metadata: { channel: type, provider_id: sender } }).select('id').single();
+      const createdCustomer = await supabase.from('customers').insert({ business_id: businessId, name: (type === 'instagram' ? 'Instagram ' : 'Facebook ') + sender, external_id: customerExternal, metadata: { channel: type, provider_id: sender } }).select('id,name,phone').single();
       customer = createdCustomer.data;
     }
     if (customer?.id && !conversation.customer_id) await supabase.from('conversations').update({ customer_id: customer.id }).eq('id', conversation.id);
