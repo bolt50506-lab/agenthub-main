@@ -76,6 +76,7 @@ export async function POST(req: NextRequest) {
             });
             const meData = await meRes.json().catch(() => ({}));
             const meId = String(meData?.id || '');
+            let pageData: any = {};
 
             // A Page access token resolves /me to the Page. Check the
             // Page-linked Instagram Business Account directly.
@@ -84,7 +85,7 @@ export async function POST(req: NextRequest) {
                 `https://graph.facebook.com/${META_VERSION}/${encodeURIComponent(meId)}?fields=id,name,instagram_business_account{id,username}`,
                 { headers: { Authorization: `Bearer ${token}` } },
               );
-              const pageData = await pageRes.json().catch(() => ({}));
+              pageData = await pageRes.json().catch(() => ({}));
               const pageIgId = String(pageData?.instagram_business_account?.id || '');
 
               if (pageIgId === igId) {
