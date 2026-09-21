@@ -56,6 +56,7 @@ export default function ProductsPage() {
   const [items, setItems] = useState<CatalogItem[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | CatalogType>('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -73,11 +74,18 @@ export default function ProductsPage() {
 
   const fetchAll = async () => {
     if (!activeBusiness) return;
+    setLoadError(null);
     const [prodRes, catRes, serviceRes] = await Promise.all([
       supabase.from('products').select('*').eq('business_id', activeBusiness.id).order('created_at', { ascending: false }),
       supabase.from('product_categories').select('*').eq('business_id', activeBusiness.id).order('name'),
       supabase.from('services').select('*').eq('business_id', activeBusiness.id).order('created_at', { ascending: false }),
     ]);
+
+    const firstError = prodRes.error || catRes.error || serviceRes.error;
+    if (firstError) {
+      console.error('[Products] Load failed:', firstError.message);
+      setLoadError(firstError.message);
+    }
 
     const products = ((prodRes.data ?? []) as Product[]).map((p) => ({ ...p, catalog_type: 'product' as const }));
     const services = ((serviceRes.data ?? []) as Service[]).map((s) => ({
@@ -226,6 +234,7 @@ export default function ProductsPage() {
 
   return (
     <div className="space-y-6">
+      {loadError && <Card className="border-destructive/30 bg-destructive/5"><CardContent className="py-3 text-sm text-destructive">Products/services could not be fully loaded: {loadError}.</CardContent></Card>}
       <div className="flex flex-col gap-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
