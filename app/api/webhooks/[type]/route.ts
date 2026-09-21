@@ -116,27 +116,97 @@ async function sendMeta(channel: Channel, cfg: Record<string, any>, recipient: s
 
 async function processWebhook(type: Channel, body: any) {
   const supabase = createServiceClient();
-  const entry = body?.entry?.[0];
-  const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
-  if (!messaging.length) return;
+  const entries = Array.isArray(body?.entry) ? body.entry : [];
 
-  const recipientId = String(messaging[0]?.recipient?.id || entry?.id || '');
+  // Meta can deliver more than one entry in a single webhook request. Instagram
+  // Login normally uses entry[].messaging, but accepting changes[].value.messages
+  // as well makes the handler tolerant of the other Instagram webhook envelope.
+  const events = entries.flatMap((entry: any) => {
+    const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
+    if (messaging.length) {
+      return messaging.map((event: any) => ({
+        entryId: String(entry?.id || ''),
+        senderId: String(event?.sender?.id || event?.from?.id || ''),
+        recipientId: String(event?.recipient?.id || entry?.id || ''),
+        messageId: String(event?.message?.mid || event?.message?.id || event?.id || ''),
+        text: String(event?.message?.text || event?.message?.text?.body || event?.text?.body || '').trim(),
+        message: event?.message || event,
+      }));
+    }
+
+    const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+    return changes.flatMap((change: any) => {
+      const value = change?.value || {};
+      const messages = Array.isArray(value?.messages) ? value.messages : [];
+      return messages.map((message: any) => ({
+        entryId: String(entry?.id || ''),
+        senderId: String(message?.from?.id || ''),
+        recipientId: String(value?.recipient?.id || entry?.id || ''),
+        messageId: String(message?.id || ''),
+        text: String(message?.text?.body || message?.text || '').trim(),
+        message,
+      }));
+    });
+  });
+
+  if (!events.length) {
+    console.warn('Meta social webhook received no messaging events', {
+      type,
+      object: body?.object,
+      entryCount: entries.length,
+    });
+    return;
+  }
+
   const integrationField = type === 'facebook_messenger' ? 'page_id' : 'instagram_account_id';
-  const { data: integrations } = await supabase.from('integrations').select('id,business_id,config,status').eq('type', type).eq('status', 'connected').filter('config->>' + integrationField, 'eq', recipientId).limit(1);
-  const integration = integrations?.[0];
+
+  for (const inbound of events) {
+    const candidateIds = [inbound.recipientId, inbound.entryId].filter(Boolean);
+    let integration: any = null;
+
+    for (const candidateId of candidateIds) {
+      const { data } = await supabase
+        .from('integrations')
+        .select('id,business_id,config,status')
+        .eq('type', type)
+        .eq('status', 'connected')
+        .filter('config->>' + integrationField, 'eq', candidateId)
+        .limit(1)
+        .maybeSingle();
+      if (data) {
+        integration = data;
+        break;
+      }
+    }
+
+    if (!integration) {
+      console.warn('No connected ' + type + ' integration for webhook IDs', candidateIds);
+      continue;
+    }
+
+    const cfg = (integration.config || {}) as Record<string, any>;
+    const businessId = integration.business_id;
+    const sender = inbound.senderId;
+    const text = inbound.text;
+    const messageId = inbound.messageId;
+
+    if (!sender || !text) {
+      console.warn('Ignoring Meta event without sender/text', {
+        type,
+        sender,
+        messageId,
+        hasMessage: Boolean(inbound.message),
+      });
+      continue;
+    }
+
+    if (inbound.message?.is_echo || inbound.message?.app_id) continue;
   if (!integration) {
     console.warn('No connected ' + type + ' integration for recipient ' + recipientId);
     return;
   }
   const cfg = (integration.config || {}) as Record<string, any>;
   const businessId = integration.business_id;
-
-  for (const event of messaging) {
-    if (event?.message?.is_echo || event?.message?.app_id) continue;
-    const sender = String(event?.sender?.id || '');
-    const text = String(event?.message?.text || '').trim();
-    const messageId = String(event?.message?.mid || '');
-    if (!sender || !text) continue;
 
     const externalId = type + ':' + sender;
     let { data: conversation } = await supabase.from('conversations').select('id,agent_id,customer_id,ai_enabled,human_takeover,status').eq('business_id', businessId).eq('external_id', externalId).limit(1).maybeSingle();
