@@ -21,7 +21,7 @@ export default function ConversationsPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [search, setSearch] = useState('');
-  const [channel, setChannel] = useState<'all' | 'website_chat' | 'whatsapp'>('all');
+  const [channel, setChannel] = useState<'all' | 'website_chat' | 'whatsapp' | 'facebook_messenger' | 'instagram'>('all');
   const [replyText, setReplyText] = useState('');
   const [sending, setSending] = useState(false);
   const [modeChanging, setModeChanging] = useState(false);
@@ -206,8 +206,9 @@ export default function ConversationsPage() {
     setSendError(null);
     const content = replyText.trim();
     try {
-      if (selectedConversation.channel === 'whatsapp') {
-        const response = await fetch('/api/whatsapp/send', {
+      if (['whatsapp','facebook_messenger','instagram'].includes(selectedConversation.channel)) {
+        const sendEndpoint = selectedConversation.channel === 'whatsapp' ? '/api/whatsapp/send' : '/api/meta/send';
+        const response = await fetch(sendEndpoint, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ business_id: activeBusiness.id, conversation_id: selectedId, message: content }),
         });
@@ -240,7 +241,7 @@ export default function ConversationsPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-xl font-bold">Conversation Inbox</h2>
-          <p className="text-sm text-muted-foreground">See customer messages from your website widget and connected WhatsApp in one place.</p>
+          <p className="text-sm text-muted-foreground">See customer messages from your website, WhatsApp, Facebook Messenger and Instagram in one place.</p>
         </div>
         <Button variant="outline" size="sm" onClick={() => { loadConversations(); if (selectedId) loadMessages(selectedId); }}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
       </div>
