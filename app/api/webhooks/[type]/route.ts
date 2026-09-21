@@ -118,9 +118,6 @@ async function processWebhook(type: Channel, body: any) {
   const supabase = createServiceClient();
   const entries = Array.isArray(body?.entry) ? body.entry : [];
 
-  // Meta can deliver more than one entry in a single webhook request. Instagram
-  // Login normally uses entry[].messaging, but accepting changes[].value.messages
-  // as well makes the handler tolerant of the other Instagram webhook envelope.
   const events = entries.flatMap((entry: any) => {
     const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
     if (messaging.length) {
@@ -161,6 +158,8 @@ async function processWebhook(type: Channel, body: any) {
   const integrationField = type === 'facebook_messenger' ? 'page_id' : 'instagram_account_id';
 
   for (const inbound of events) {
+    if (inbound.message?.is_echo || inbound.message?.app_id) continue;
+
     const candidateIds = [inbound.recipientId, inbound.entryId].filter(Boolean);
     let integration: any = null;
 
@@ -173,6 +172,7 @@ async function processWebhook(type: Channel, body: any) {
         .filter('config->>' + integrationField, 'eq', candidateId)
         .limit(1)
         .maybeSingle();
+
       if (data) {
         integration = data;
         break;
@@ -200,65 +200,173 @@ async function processWebhook(type: Channel, body: any) {
       continue;
     }
 
-    if (inbound.message?.is_echo || inbound.message?.app_id) continue;
-  if (!integration) {
-    console.warn('No connected ' + type + ' integration for recipient ' + recipientId);
-    return;
-  }
-  const cfg = (integration.config || {}) as Record<string, any>;
-  const businessId = integration.business_id;
-
     const externalId = type + ':' + sender;
-    let { data: conversation } = await supabase.from('conversations').select('id,agent_id,customer_id,ai_enabled,human_takeover,status').eq('business_id', businessId).eq('external_id', externalId).limit(1).maybeSingle();
+    let { data: conversation } = await supabase
+      .from('conversations')
+      .select('id,agent_id,customer_id,ai_enabled,human_takeover,status')
+      .eq('business_id', businessId)
+      .eq('external_id', externalId)
+      .limit(1)
+      .maybeSingle();
 
-    const { data: agent } = await supabase.from('agents').select('id,name,communication_style,primary_goal,description,status').eq('business_id', businessId).eq('status', 'active').eq('name', 'Ayesha').limit(1).maybeSingle();
-    const selectedAgent = agent || (await supabase.from('agents').select('id,name,communication_style,primary_goal,description,status').eq('business_id', businessId).eq('status', 'active').limit(1).maybeSingle()).data;
-    const { data: settings } = await supabase.from('agent_settings').select('tone,auto_create_leads,custom_instructions,response_language').eq('business_id', businessId).order('updated_at', { ascending: false }).limit(1).maybeSingle();
+    const { data: agent } = await supabase
+      .from('agents')
+      .select('id,name,communication_style,primary_goal,description,status')
+      .eq('business_id', businessId)
+      .eq('status', 'active')
+      .eq('name', 'Ayesha')
+      .limit(1)
+      .maybeSingle();
+
+    const selectedAgent = agent || (await supabase
+      .from('agents')
+      .select('id,name,communication_style,primary_goal,description,status')
+      .eq('business_id', businessId)
+      .eq('status', 'active')
+      .limit(1)
+      .maybeSingle()).data;
+
+    const { data: settings } = await supabase
+      .from('agent_settings')
+      .select('tone,auto_create_leads,custom_instructions,response_language')
+      .eq('business_id', businessId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     if (!conversation) {
       const created = await supabase.from('conversations').insert({
-        business_id: businessId, agent_id: selectedAgent?.id || null, type: 'customer',
-        title: (type === 'instagram' ? 'Instagram ' : 'Facebook ') + sender, external_id: externalId,
-        channel: type, ai_enabled: true, status: 'active', human_takeover: false,
+        business_id: businessId,
+        agent_id: selectedAgent?.id || null,
+        type: 'customer',
+        title: (type === 'instagram' ? 'Instagram ' : 'Facebook ') + sender,
+        external_id: externalId,
+        channel: type,
+        ai_enabled: true,
+        status: 'active',
+        human_takeover: false,
       }).select('id,agent_id,customer_id,ai_enabled,human_takeover,status').single();
-      if (created.error) { console.error('Social conversation creation failed:', created.error.message); continue; }
+
+      if (created.error) {
+        console.error('Social conversation creation failed:', created.error.message);
+        continue;
+      }
       conversation = created.data;
     }
 
-    const customerExternal = externalId;
-    let { data: customer } = await supabase.from('customers').select('id,name,phone').eq('business_id', businessId).eq('external_id', customerExternal).limit(1).maybeSingle();
+    let { data: customer } = await supabase
+      .from('customers')
+      .select('id,name,phone')
+      .eq('business_id', businessId)
+      .eq('external_id', externalId)
+      .limit(1)
+      .maybeSingle();
+
     if (!customer) {
-      const createdCustomer = await supabase.from('customers').insert({ business_id: businessId, name: (type === 'instagram' ? 'Instagram ' : 'Facebook ') + sender, external_id: customerExternal, metadata: { channel: type, provider_id: sender } }).select('id,name,phone').single();
+      const createdCustomer = await supabase.from('customers').insert({
+        business_id: businessId,
+        name: (type === 'instagram' ? 'Instagram ' : 'Facebook ') + sender,
+        external_id: externalId,
+        metadata: { channel: type, provider_id: sender },
+      }).select('id,name,phone').single();
       customer = createdCustomer.data;
     }
-    if (customer?.id && !conversation.customer_id) await supabase.from('conversations').update({ customer_id: customer.id }).eq('id', conversation.id);
+
+    if (customer?.id && !conversation.customer_id) {
+      await supabase.from('conversations').update({ customer_id: customer.id }).eq('id', conversation.id);
+    }
 
     if (messageId) {
-      const { data: dup } = await supabase.from('messages').select('id').eq('business_id', businessId).filter('metadata->>provider_message_id', 'eq', messageId).limit(1).maybeSingle();
+      const { data: dup } = await supabase
+        .from('messages')
+        .select('id')
+        .eq('business_id', businessId)
+        .filter('metadata->>provider_message_id', 'eq', messageId)
+        .limit(1)
+        .maybeSingle();
       if (dup) continue;
     }
 
     await supabase.from('messages').insert({
-      business_id: businessId, conversation_id: conversation.id, sender_type: 'customer', content: text,
-      content_type: 'text', metadata: { provider_message_id: messageId, provider: type, sender_id: sender }, is_inbound: true,
+      business_id: businessId,
+      conversation_id: conversation.id,
+      sender_type: 'customer',
+      content: text,
+      content_type: 'text',
+      metadata: { provider_message_id: messageId, provider: type, sender_id: sender },
+      is_inbound: true,
     });
-    await supabase.from('conversations').update({ last_message_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', conversation.id);
+
+    await supabase.from('conversations').update({
+      last_message_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq('id', conversation.id);
 
     if (settings?.auto_create_leads !== false) {
-      const { data: lead } = await supabase.from('leads').select('id').eq('business_id', businessId).eq('phone', sender).neq('status', 'converted').order('created_at', { ascending: false }).limit(1).maybeSingle();
-      if (!lead) await supabase.from('leads').insert({ business_id: businessId, customer_id: customer?.id || null, conversation_id: conversation.id, name: (type === 'instagram' ? 'Instagram ' : 'Facebook ') + sender, phone: sender, source: type, requirement: text.slice(0, 1000), status: 'new' });
+      const { data: lead } = await supabase.from('leads')
+        .select('id')
+        .eq('business_id', businessId)
+        .eq('phone', sender)
+        .neq('status', 'converted')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!lead) {
+        await supabase.from('leads').insert({
+          business_id: businessId,
+          customer_id: customer?.id || null,
+          conversation_id: conversation.id,
+          name: (type === 'instagram' ? 'Instagram ' : 'Facebook ') + sender,
+          phone: sender,
+          source: type,
+          requirement: text.slice(0, 1000),
+          status: 'new',
+        });
+      }
     }
 
     if (conversation.human_takeover || conversation.ai_enabled === false) continue;
 
-    const { data: prior } = await supabase.from('messages').select('content,is_inbound').eq('conversation_id', conversation.id).order('created_at', { ascending: false }).limit(12);
-    const history = (prior || []).reverse().map((m: any) => ({ role: m.is_inbound ? 'user' : 'assistant', text: m.content }));
-    const prompt = 'You are the AI assistant for this business. Never introduce yourself by name. Answer directly. Reply naturally in English or Roman Urdu based on the customer. Never mention internal agents, providers, APIs, databases or workflow labels. Never invent prices, policies, bookings, payments, discounts or guarantees. Keep replies concise and complete. Tone: ' + (settings?.tone || selectedAgent?.communication_style || 'friendly-professional') + '. Instructions: ' + (settings?.custom_instructions || 'Reply naturally, accurately and helpfully.') + '\n\n' + await knowledge(businessId, text, supabase);
+    const { data: prior } = await supabase.from('messages')
+      .select('content,is_inbound')
+      .eq('conversation_id', conversation.id)
+      .order('created_at', { ascending: false })
+      .limit(12);
+
+    const history = (prior || []).reverse().map((m: any) => ({
+      role: m.is_inbound ? 'user' : 'assistant',
+      text: m.content,
+    }));
+
+    const prompt =
+      'You are the AI assistant for this business. Never introduce yourself by name. Answer directly. Reply naturally in English or Roman Urdu based on the customer. Never mention internal agents, providers, APIs, databases or workflow labels. Never invent prices, policies, bookings, payments, discounts or guarantees. Keep replies concise and complete. Tone: ' +
+      (settings?.tone || selectedAgent?.communication_style || 'friendly-professional') +
+      '. Instructions: ' +
+      (settings?.custom_instructions || 'Reply naturally, accurately and helpfully') +
+      '\n\n' +
+      await knowledge(businessId, text, supabase);
+
     const generated = await generateReply(prompt, text, history);
     const reply = cleanReply(generated.reply);
+
     await sendMeta(type, cfg, sender, reply);
-    await supabase.from('messages').insert({ business_id: businessId, conversation_id: conversation.id, sender_type: 'agent', sender_id: selectedAgent?.id || null, content: reply, content_type: 'text', metadata: { provider: type, ai_provider: generated.provider, recipient_id: sender }, is_inbound: false });
-    await supabase.from('conversations').update({ last_message_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', conversation.id);
+
+    await supabase.from('messages').insert({
+      business_id: businessId,
+      conversation_id: conversation.id,
+      sender_type: 'agent',
+      sender_id: selectedAgent?.id || null,
+      content: reply,
+      content_type: 'text',
+      metadata: { provider: type, ai_provider: generated.provider, recipient_id: sender },
+      is_inbound: false,
+    });
+
+    await supabase.from('conversations').update({
+      last_message_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq('id', conversation.id);
   }
 }
 
