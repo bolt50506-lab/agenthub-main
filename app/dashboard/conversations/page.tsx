@@ -90,11 +90,6 @@ export default function ConversationsPage() {
   }, []);
 
   useEffect(() => { setLoading(true); loadConversations(); }, [loadConversations]);
-  useEffect(() => {
-    if (!activeBusiness) return;
-    const timer = window.setInterval(() => { void loadConversations(); if (activeConversationRef.current) void loadMessages(activeConversationRef.current); }, 5000);
-    return () => window.clearInterval(timer);
-  }, [activeBusiness, loadConversations, loadMessages]);
   useEffect(() => { if (!selectedId) { setMessages([]); return; } activeConversationRef.current = selectedId; shouldStickToBottomRef.current = true; setMobileDetailOpen(true); loadMessages(selectedId); }, [selectedId, loadMessages]);
 
   useEffect(() => {
@@ -127,9 +122,9 @@ export default function ConversationsPage() {
             : conversation
         ));
       })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `business_id=eq.${activeBusiness.id}` }, (payload) => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
         const message = payload.new as Message;
-        if (!message?.id || !message.conversation_id) return;
+        if (!message?.id || !message.conversation_id || message.business_id !== activeBusiness.id) return;
 
         setConversations((current) => current.map((conversation) =>
           conversation.id === message.conversation_id
@@ -143,10 +138,9 @@ export default function ConversationsPage() {
 
         if (activeConversationRef.current !== message.conversation_id) return;
 
-        setMessages((current) => {
-          if (current.some((existing) => existing.id === message.id)) return current;
-          return [...current, message];
-        });
+        // Re-fetch the selected conversation from Supabase so the inbox stays
+        // authoritative without polling or replacing the user's typing state.
+        void loadMessages(message.conversation_id);
       })
       .subscribe((status) => {
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
