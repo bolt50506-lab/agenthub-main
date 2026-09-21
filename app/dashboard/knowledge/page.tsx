@@ -40,6 +40,7 @@ export default function KnowledgeBasePage() {
   const { toast } = useToast();
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [createOpen, setCreateOpen] = useState(false);
@@ -53,11 +54,18 @@ export default function KnowledgeBasePage() {
 
   const fetchItems = async () => {
     if (!activeBusiness) return;
+    setLoadError(null);
     let query = supabase.from('knowledge_items').select('*').eq('business_id', activeBusiness.id).order('created_at', { ascending: false });
     if (categoryFilter !== 'all') query = query.eq('category', categoryFilter);
     if (search) query = query.or(`title.ilike.%${search}%,content.ilike.%${search}%`);
-    const { data } = await query;
-    setItems(data as KnowledgeItem[] ?? []);
+    const { data, error } = await query;
+    if (error) {
+      console.error('[Knowledge] Load failed:', error.message);
+      setLoadError(error.message);
+      setItems([]);
+    } else {
+      setItems(data as KnowledgeItem[] ?? []);
+    }
     setLoading(false);
   };
 
@@ -98,6 +106,10 @@ export default function KnowledgeBasePage() {
       });
     }
     setSubmitting(false);
+    if (error) {
+      toast({ title: 'Knowledge item could not be created', description: error.message, variant: 'destructive' });
+      return;
+    }
     setCreateOpen(false);
     setForm({ title: '', category: 'business_info', content: '', tags: '' });
     await fetchItems();
@@ -107,10 +119,14 @@ export default function KnowledgeBasePage() {
   const handleEdit = async () => {
     if (!editItem) return;
     setSubmitting(true);
-    await supabase.from('knowledge_items').update({
+    const { error } = await supabase.from('knowledge_items').update({
       title: editItem.title, category: editItem.category, content: editItem.content,
     }).eq('id', editItem.id);
     setSubmitting(false);
+    if (error) {
+      toast({ title: 'Knowledge item update failed', description: error.message, variant: 'destructive' });
+      return;
+    }
     setEditItem(null);
     await fetchItems();
     toast({ title: 'Knowledge item updated' });
@@ -118,7 +134,11 @@ export default function KnowledgeBasePage() {
 
   const handleDelete = async () => {
     if (!deleteId) return;
-    await supabase.from('knowledge_items').delete().eq('id', deleteId);
+    const { error } = await supabase.from('knowledge_items').delete().eq('id', deleteId);
+    if (error) {
+      toast({ title: 'Knowledge item deletion failed', description: error.message, variant: 'destructive' });
+      return;
+    }
     setDeleteId(null);
     await fetchItems();
     toast({ title: 'Knowledge item deleted' });
@@ -128,6 +148,7 @@ export default function KnowledgeBasePage() {
 
   return (
     <div className="space-y-6">
+      {loadError && <Card className="border-destructive/30 bg-destructive/5"><CardContent className="py-3 text-sm text-destructive">Knowledge base could not be loaded: {loadError}.</CardContent></Card>}
       <Card className="border-primary/20">
         <CardContent className="p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
