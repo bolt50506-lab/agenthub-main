@@ -27,6 +27,7 @@ export default function ConversationsPage() {
   const [modeChanging, setModeChanging] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [messagesError, setMessagesError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const messageScrollRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
@@ -77,7 +78,13 @@ export default function ConversationsPage() {
 
   const loadMessages = useCallback(async (conversationId: string) => {
     setMessagesLoading(true);
-    const { data } = await supabase.from('messages').select('*').eq('conversation_id', conversationId).order('created_at', { ascending: true });
+    setMessagesError(null);
+    const { data, error } = await supabase.from('messages').select('*').eq('conversation_id', conversationId).order('created_at', { ascending: true });
+    if (error) {
+      setMessagesError(error.message);
+      setMessagesLoading(false);
+      return;
+    }
     setMessages((data as Message[]) ?? []);
     setMessagesLoading(false);
   }, []);
@@ -85,7 +92,7 @@ export default function ConversationsPage() {
   useEffect(() => { setLoading(true); loadConversations(); }, [loadConversations]);
   useEffect(() => {
     if (!activeBusiness) return;
-    const timer = window.setInterval(() => { void loadConversations(); if (activeConversationRef.current) void loadMessages(activeConversationRef.current); }, 15000);
+    const timer = window.setInterval(() => { void loadConversations(); if (activeConversationRef.current) void loadMessages(activeConversationRef.current); }, 5000);
     return () => window.clearInterval(timer);
   }, [activeBusiness, loadConversations, loadMessages]);
   useEffect(() => { if (!selectedId) { setMessages([]); return; } activeConversationRef.current = selectedId; shouldStickToBottomRef.current = true; setMobileDetailOpen(true); loadMessages(selectedId); }, [selectedId, loadMessages]);
@@ -283,7 +290,7 @@ export default function ConversationsPage() {
             </CardHeader>
             <CardContent className="flex min-h-0 flex-1 flex-col p-0">
               <div ref={messageScrollRef} onScroll={handleMessageScroll} className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain bg-muted/20 p-4">
-                {messagesLoading ? <div className="flex h-full items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div> : messages.length === 0 ? <div className="flex h-full items-center justify-center text-sm text-muted-foreground">No messages in this conversation.</div> : messages.map((message) => {
+                {messagesLoading ? <div className="flex h-full items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div> : messagesError ? <div className="flex h-full flex-col items-center justify-center px-6 text-center"><p className="text-sm font-medium text-destructive">Messages could not be loaded</p><p className="mt-1 text-xs text-muted-foreground">{messagesError}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => loadMessages(selectedConversation.id)}>Retry</Button></div> : messages.length === 0 ? <div className="flex h-full items-center justify-center text-sm text-muted-foreground">No messages in this conversation.</div> : messages.map((message) => {
                   const outbound = !message.is_inbound; const human = message.sender_type === 'business';
                   return <div key={message.id} className={`flex ${outbound ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[82%] rounded-2xl px-3.5 py-2.5 text-sm shadow-sm ${outbound ? (human ? 'bg-foreground text-background' : 'bg-primary text-primary-foreground') : 'bg-card border'}`}>{message.sender_type === 'agent' && <div className="mb-1 flex items-center gap-1 text-[10px] opacity-70"><Bot className="h-3 w-3" /> AgentHub AI</div>}{human && <div className="mb-1 flex items-center gap-1 text-[10px] opacity-70"><UserRound className="h-3 w-3" /> Team reply</div>}<p className="whitespace-pre-wrap break-words">{message.content}</p><p className="mt-1 text-right text-[10px] opacity-60">{new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p></div></div>;
                 })}<div ref={bottomRef} />
