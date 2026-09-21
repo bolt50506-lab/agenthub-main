@@ -73,8 +73,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => { await supabase.auth.signOut(); syncAuthCookie(null); setProfile(null); setBusinesses([]); };
   const refreshProfile = async () => { if (user) await loadProfileAndBusinesses(user.id); };
   const setActiveBusiness = async (businessId: string) => { if (!user) return; await supabase.from('profiles').update({ active_business_id: businessId }).eq('id', user.id); await refreshProfile(); };
-  const activeBusiness = profile?.active_business_id ? businesses.find((b) => b.business.id === profile.active_business_id)?.business ?? null : businesses[0]?.business ?? null;
-  const activeMembership = profile?.active_business_id ? businesses.find((b) => b.business.id === profile.active_business_id)?.membership ?? null : businesses[0]?.membership ?? null;
+  // Always fall back to an accessible membership if the stored active_business_id is stale,
+  // missing, or no longer belongs to the signed-in user. This prevents dashboard data
+  // pages from getting stuck with activeBusiness=null after workspace changes.
+  const activeEntry = profile?.active_business_id
+    ? businesses.find((b) => b.business.id === profile.active_business_id) ?? businesses[0] ?? null
+    : businesses[0] ?? null;
+  const activeBusiness = activeEntry?.business ?? null;
+  const activeMembership = activeEntry?.membership ?? null;
 
   return <AuthContext.Provider value={{ user, session, profile, businesses, activeBusiness, activeMembership, loading, signIn, signOut, refreshProfile, setActiveBusiness }}>{children}</AuthContext.Provider>;
 }
