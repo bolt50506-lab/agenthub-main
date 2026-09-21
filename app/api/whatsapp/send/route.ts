@@ -31,8 +31,13 @@ export async function POST(req: NextRequest) {
     const destination = normalizeWhatsAppJid(customer?.phone || customer?.external_id || '');
     if (!destination) return NextResponse.json({ success: false, error: 'Customer WhatsApp number is not available' }, { status: 400 });
 
-    const { data: session } = await supabase.from('whatsapp_sessions').select('session_id, status').eq('business_id', business_id).eq('connection_method', 'qr_code').eq('status', 'connected').order('updated_at', { ascending: false }).limit(1).maybeSingle();
-    if (!session?.session_id) return NextResponse.json({ success: false, error: 'No connected WhatsApp QR session was found' }, { status: 409 });
+    const { data: integration } = await supabase.from('integrations').select('id,type,status,config').eq('business_id', business_id).eq('type','whatsapp').eq('status','connected').maybeSingle();
+    const integrationConfig = (integration?.config || {}) as Record<string, any>;
+    const cloudToken = String(integrationConfig.access_token || '');
+    const phoneNumberId = String(integrationConfig.phone_number_id || '');
+    const useCloud = Boolean(cloudToken && phoneNumberId);
+    const { data: session } = useCloud ? { data: null } : await supabase.from('whatsapp_sessions').select('session_id, status').eq('business_id', business_id).eq('connection_method', 'qr_code').eq('status', 'connected').order('updated_at', { ascending: false }).limit(1).maybeSingle();
+    if (!useCloud && !session?.session_id) return NextResponse.json({ success: false, error: 'No connected WhatsApp Cloud API or QR session was found' }, { status: 409 });
 
     // Claim the conversation for the human BEFORE sending the outbound message.
     // This closes the race where a customer message arriving during the send
@@ -50,16 +55,25 @@ export async function POST(req: NextRequest) {
     }).eq('id', conversation_id).eq('business_id', business_id);
     if (takeoverError) return NextResponse.json({ success: false, error: `Could not activate human takeover: ${takeoverError.message}` }, { status: 500 });
 
-    const serviceResponse = await fetch(`${WHATSAPP_QR_SERVICE_URL}/sessions/${encodeURIComponent(session.session_id)}/send`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(OUTBOUND_API_TOKEN ? { Authorization: `Bearer ${OUTBOUND_API_TOKEN}` } : {}) },
-      body: JSON.stringify({ to: destination, message: message.trim() }),
-      cache: 'no-store',
-    });
-    const serviceData = await serviceResponse.json().catch(() => null);
-    if (!serviceResponse.ok || serviceData?.success === false) {
-      console.error('[WhatsApp] Human message send failed while takeover was active:', serviceData?.message || serviceResponse.status);
-      return NextResponse.json({ success: false, error: serviceData?.message || 'WhatsApp provider could not send the message', human_takeover: true }, { status: 502 });
+    let providerData: any = null;
+    if (useCloud) {
+      const cloudResponse = await fetch('https://graph.facebook.com/v23.0/' + encodeURIComponent(phoneNumberId) + '/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cloudToken },
+        body: JSON.stringify({ messaging_product: 'whatsapp', to: String(customer?.phone || '').replace(/\D/g,''), type: 'text', text: { preview_url: false, body: message.trim() } }),
+        cache: 'no-store',
+      });
+      providerData = await cloudResponse.json().catch(() => null);
+      if (!cloudResponse.ok || providerData?.error) return NextResponse.json({ success: false, error: providerData?.error?.message || 'WhatsApp Cloud API could not send the message', human_takeover: true }, { status: 502 });
+    } else {
+      const serviceResponse = await fetch(WHATSAPP_QR_SERVICE_URL + '/sessions/' + encodeURIComponent(session.session_id) + '/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(OUTBOUND_API_TOKEN ? { Authorization: 'Bearer ' + OUTBOUND_API_TOKEN } : {}) },
+        body: JSON.stringify({ to: destination, message: message.trim() }),
+        cache: 'no-store',
+      });
+      providerData = await serviceResponse.json().catch(() => null);
+      if (!serviceResponse.ok || providerData?.success === false) return NextResponse.json({ success: false, error: providerData?.message || 'WhatsApp provider could not send the message', human_takeover: true }, { status: 502 });
     }
 
     const { error: insertError } = await supabase.from('messages').insert({ business_id, conversation_id, sender_type: 'business', content: message.trim(), content_type: 'text', is_inbound: false, metadata: { sent_via: 'dashboard_whatsapp', human_takeover: true } });
