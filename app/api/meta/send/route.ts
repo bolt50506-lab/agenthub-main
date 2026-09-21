@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     if (!businessId || !conversationId || !message) return NextResponse.json({ success: false, error: 'business_id, conversation_id and message are required' }, { status: 400 });
 
     const supabase = createServiceClient();
-    if (!(await hasActiveSubscription(supabase, business_id))) return NextResponse.json({ success: false, error: 'Subscription inactive or expired' }, { status: 402 });
+    if (!(await hasActiveSubscription(supabase, businessId))) return NextResponse.json({ success: false, error: 'Subscription inactive or expired' }, { status: 402 });
     const { data: conversation } = await supabase.from('conversations').select('id,business_id,customer_id,channel').eq('id', conversationId).eq('business_id', businessId).maybeSingle();
     if (!conversation || !['facebook_messenger','instagram'].includes(conversation.channel)) return NextResponse.json({ success: false, error: 'Meta social conversation not found' }, { status: 404 });
     const { data: customer } = await supabase.from('customers').select('external_id').eq('id', conversation.customer_id).maybeSingle();
