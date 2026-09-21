@@ -35,6 +35,7 @@ export default function LeadsPage() {
   const { toast } = useToast();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [createOpen, setCreateOpen] = useState(false);
@@ -47,13 +48,20 @@ export default function LeadsPage() {
 
   const fetchLeads = async () => {
     if (!activeBusiness) return;
+    setLoadError(null);
     let query = supabase.from('leads').select('*').eq('business_id', activeBusiness.id).order('created_at', { ascending: false });
     if (statusFilter !== 'all') query = query.eq('status', statusFilter);
     if (search) {
       query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%,email.ilike.%${search}%`);
     }
-    const { data } = await query;
-    setLeads(data as Lead[] ?? []);
+    const { data, error } = await query;
+    if (error) {
+      console.error('[Leads] Load failed:', error.message);
+      setLoadError(error.message);
+      setLeads([]);
+    } else {
+      setLeads(data as Lead[] ?? []);
+    }
     setLoading(false);
   };
 
@@ -82,6 +90,10 @@ export default function LeadsPage() {
       });
     }
     setSubmitting(false);
+    if (error) {
+      toast({ title: 'Lead could not be created', description: error.message, variant: 'destructive' });
+      return;
+    }
     setCreateOpen(false);
     setForm({ name: '', phone: '', email: '', source: 'manual', interested_product: '', budget: '', location: '', requirement: '' });
     await fetchLeads();
@@ -92,6 +104,8 @@ export default function LeadsPage() {
 
   return (
     <div className="space-y-6">
+      {loadError && <Card className="border-destructive/30 bg-destructive/5"><CardContent className="py-3 text-sm text-destructive">Leads could not be loaded: {loadError}. Use Refresh or reload after your session/workspace is restored.</CardContent></Card>}
+
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3 flex-1">
           <div className="relative flex-1 max-w-xs">
@@ -112,7 +126,7 @@ export default function LeadsPage() {
           </Select>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" className="gap-2" onClick={() => setIoOpen(true)}><Upload className="w-4 h-4" /> Import / Export</Button>
+          <Button variant="outline" className="gap-2" onClick={() => { void fetchLeads(); setIoOpen(true); }}><Upload className="w-4 h-4" /> Import / Export</Button>
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
           <DialogTrigger asChild>
             <Button className="gap-2"><Plus className="w-4 h-4" /> Create Lead</Button>
