@@ -1038,7 +1038,7 @@ export default function IntegrationsPage() {
                       </Button>
                     </div>
                     <code className="block text-xs text-muted-foreground truncate">
-                      {(type === 'facebook_messenger' || type === 'instagram') ? 'https://xzfxlwltnpdlnjtdjwsg.supabase.co/functions/v1/meta-social-webhook' : `${typeof window !== 'undefined' ? window.location.origin : 'https://your-app.com'}/api/webhooks/${type}`}
+                      ${typeof window !== 'undefined' ? window.location.origin : 'https://agenthub-ai-new.netlify.app'}/api/webhooks/${type}
                     </code>
                   </div>
                 )}
