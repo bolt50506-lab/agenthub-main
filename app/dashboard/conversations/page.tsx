@@ -90,6 +90,31 @@ export default function ConversationsPage() {
   }, []);
 
   useEffect(() => { setLoading(true); loadConversations(); }, [loadConversations]);
+  useEffect(() => {
+    if (!selectedId) return;
+    let cancelled = false;
+
+    // Silent background sync for the open conversation only. This does not
+    // refresh the page, reload the inbox, or touch the reply input.
+    const syncOpenConversation = async () => {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', selectedId)
+        .order('created_at', { ascending: true });
+
+      if (cancelled || error) return;
+      setMessages((current) => {
+        const incoming = (data as Message[]) ?? [];
+        if (incoming.length === current.length && incoming.every((m, i) => m.id === current[i]?.id)) return current;
+        return incoming;
+      });
+    };
+
+    const timer = window.setInterval(() => { void syncOpenConversation(); }, 3000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [selectedId]);
+
   useEffect(() => { if (!selectedId) { setMessages([]); return; } activeConversationRef.current = selectedId; shouldStickToBottomRef.current = true; setMobileDetailOpen(true); loadMessages(selectedId); }, [selectedId, loadMessages]);
 
   useEffect(() => {
