@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
 
     if(!order.encrypted_password || !order.customer_email) return NextResponse.json({error:'This order is missing signup credentials and cannot be activated automatically.'},{status:422});
     const password=decryptPassword(order.encrypted_password);
-    let userIdForBusiness: string | null = null;
+    let userIdForBusiness: string;
 
     const {data:existingProfile}=await supabase.from('profiles').select('id').eq('email',order.customer_email).maybeSingle();
     if(existingProfile?.id){
