@@ -78,8 +78,8 @@ export async function POST(req: NextRequest) {
       await supabase.auth.admin.updateUserById(userIdForBusiness,{password,email_confirm:true,user_metadata:{full_name:order.customer_name,phone:order.whatsapp_number||null}});
     } else {
       const created=await supabase.auth.admin.createUser({email:order.customer_email,password,email_confirm:true,user_metadata:{full_name:order.customer_name,phone:order.whatsapp_number||null}});
-      if(created.error||!created.user) return NextResponse.json({error:created.error?.message||'Unable to create the customer account.'},{status:500});
-      userIdForBusiness=created.user.id;
+      if(created.error||!created.data?.user) return NextResponse.json({error:created.error?.message||'Unable to create the customer account.'},{status:500});
+      userIdForBusiness=created.data.user.id;
     }
 
     let businessId=order.business_id as string|null;
