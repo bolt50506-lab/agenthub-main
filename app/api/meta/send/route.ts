@@ -1,3 +1,13 @@
+async function hasActiveSubscription(supabase: any, businessId: string) {
+  const { data: business } = await supabase.from('businesses').select('is_platform_business').eq('id', businessId).maybeSingle();
+  if (business?.is_platform_business) return true;
+  const { data: sub } = await supabase.from('business_subscriptions').select('status,end_date,overdue_grace_ends_at').eq('business_id', businessId).order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (!sub) return false;
+  const now = Date.now();
+  return ((sub.status === 'active' || sub.status === 'trial') && (!sub.end_date || new Date(sub.end_date).getTime() > now))
+    || (sub.status === 'overdue' && sub.overdue_grace_ends_at && new Date(sub.overdue_grace_ends_at).getTime() > now);
+}
+
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 
@@ -15,6 +25,7 @@ export async function POST(req: NextRequest) {
     if (!businessId || !conversationId || !message) return NextResponse.json({ success: false, error: 'business_id, conversation_id and message are required' }, { status: 400 });
 
     const supabase = createServiceClient();
+    if (!(await hasActiveSubscription(supabase, business_id))) return NextResponse.json({ success: false, error: 'Subscription inactive or expired' }, { status: 402 });
     const { data: conversation } = await supabase.from('conversations').select('id,business_id,customer_id,channel').eq('id', conversationId).eq('business_id', businessId).maybeSingle();
     if (!conversation || !['facebook_messenger','instagram'].includes(conversation.channel)) return NextResponse.json({ success: false, error: 'Meta social conversation not found' }, { status: 404 });
     const { data: customer } = await supabase.from('customers').select('external_id').eq('id', conversation.customer_id).maybeSingle();
