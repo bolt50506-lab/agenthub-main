@@ -20,41 +20,31 @@ function authorized(req: NextRequest) {
 }
 
 async function sendThroughAgentHub(supabase: any, task: any, lead: any) {
-  const base = process.env.WHATSAPP_AGENT_URL || process.env.WHATSAPP_QR_SERVICE_URL || 'https://agenthub-whatsapp-service-production.up.railway.app';
-  const token = process.env.WHATSAPP_AGENT_TOKEN || process.env.OUTBOUND_API_TOKEN || process.env.AGENTHUB_WEBHOOK_SECRET;
   if (task.channel !== 'whatsapp') throw new Error('Automated delivery for this channel is not connected yet');
-  if (!base) throw new Error('WhatsApp service URL is not configured');
   const phone = String(lead?.phone || lead?.phone_number || lead?.customer_phone || '').replace(/\D/g, '');
   if (!phone) throw new Error('Lead has no phone number for WhatsApp follow-up');
-
-  const { data: session, error: sessionError } = await supabase.from('whatsapp_sessions').select('session_id,status').eq('business_id', task.business_id).eq('status', 'connected').order('updated_at', { ascending: false }).limit(1).maybeSingle();
-  if (sessionError) throw new Error('Could not resolve connected WhatsApp session: ' + sessionError.message);
-  if (!session?.session_id) throw new Error('No connected WhatsApp session found for this business');
-
-  const headers: Record<string, string> = { 'content-type': 'application/json' };
-  if (token) headers.authorization = 'Bearer ' + token;
-  const serviceBase = base.replace(/\/$/, '');
-  const sendUrl = serviceBase + '/sessions/' + encodeURIComponent(session.session_id) + '/send';
-  const response = await fetch(sendUrl, { method: 'POST', headers, body: JSON.stringify({ to: phone + '@s.whatsapp.net', message: task.notes || 'Hi! Just following up to see if you need any help. 😊' }) });
-  const raw = await response.text();
-  let data: any = null;
-  try { data = raw ? JSON.parse(raw) : null; } catch {}
-
-  if (response.status === 404 && data?.error === 'Session not found') {
-    try {
-      const restoreResponse = await fetch(serviceBase + '/sessions', { method: 'POST', headers, body: JSON.stringify({ sessionId: session.session_id }) });
-      const restoreRaw = await restoreResponse.text();
-      let restoreData: any = null;
-      try { restoreData = restoreRaw ? JSON.parse(restoreRaw) : null; } catch {}
-      await supabase.from('whatsapp_sessions').update({ status: 'disconnected', updated_at: new Date().toISOString() }).eq('business_id', task.business_id).eq('session_id', session.session_id);
-      throw new Error('WhatsApp session was lost after the service restart. A new QR session was initialized; reconnect WhatsApp from the dashboard before automated follow-ups resume. ' + (restoreData?.error || ''));
-    } catch (recoveryError) {
-      if (recoveryError instanceof Error && recoveryError.message.startsWith('WhatsApp session was lost')) throw recoveryError;
-      throw new Error('WhatsApp session was lost after the service restart and could not be reinitialized: ' + (recoveryError instanceof Error ? recoveryError.message : String(recoveryError)));
-    }
+  const { data: integration } = await supabase.from('integrations').select('config,status').eq('business_id',task.business_id).eq('type','whatsapp').eq('status','connected').maybeSingle();
+  const cfg = (integration?.config || {}) as Record<string, any>;
+  const token = String(cfg.access_token || '');
+  const phoneNumberId = String(cfg.phone_number_id || '');
+  if (token && phoneNumberId) {
+    const response = await fetch('https://graph.facebook.com/v23.0/' + encodeURIComponent(phoneNumberId) + '/messages', {
+      method:'POST', headers:{'content-type':'application/json',authorization:'Bearer '+token},
+      body:JSON.stringify({messaging_product:'whatsapp',to:phone,type:'text',text:{preview_url:false,body:task.notes||'Hi! Just following up to see if you need any help. 😊'}})
+    });
+    const raw=await response.text(); let data:any=null; try{data=raw?JSON.parse(raw):null}catch{}
+    if(!response.ok || data?.error) throw new Error('WhatsApp Cloud follow-up failed: '+(data?.error?.message||raw));
+    return {success:true,provider:'cloud_api'};
   }
-  if (!response.ok || data?.success === false) throw new Error('WhatsApp agent rejected follow-up: ' + response.status + ' ' + (data?.error || data?.message || raw));
-  return data || { success: true };
+  const base=(process.env.WHATSAPP_AGENT_URL||process.env.WHATSAPP_QR_SERVICE_URL||'https://agenthub-whatsapp-service-production.up.railway.app').replace(/\/$/,'');
+  const serviceToken=process.env.WHATSAPP_AGENT_TOKEN||process.env.OUTBOUND_API_TOKEN||process.env.AGENTHUB_WEBHOOK_SECRET;
+  const {data:session}=await supabase.from('whatsapp_sessions').select('session_id,status').eq('business_id',task.business_id).eq('status','connected').order('updated_at',{ascending:false}).limit(1).maybeSingle();
+  if(!session?.session_id) throw new Error('No connected WhatsApp Cloud API or QR session found for this business');
+  const headers:any={'content-type':'application/json'}; if(serviceToken) headers.authorization='Bearer '+serviceToken;
+  const response=await fetch(base+'/sessions/'+encodeURIComponent(session.session_id)+'/send',{method:'POST',headers,body:JSON.stringify({to:phone+'@s.whatsapp.net',message:task.notes||'Hi! Just following up to see if you need any help. 😊'})});
+  const raw=await response.text(); let data:any=null; try{data=raw?JSON.parse(raw):null}catch{}
+  if(!response.ok||data?.success===false) throw new Error('WhatsApp QR follow-up failed: '+(data?.error||data?.message||raw));
+  return data||{success:true,provider:'qr'};
 }
 
 export async function GET(req: NextRequest) {
