@@ -63,8 +63,33 @@ export async function POST(req: NextRequest) {
           const igData = await igRes.json().catch(() => ({}));
 
           if (igRes.ok && String(igData?.id || '') === igId) {
-            success = true;
-            message = 'Instagram connection verified successfully.';
+            // Instagram Login requires the app to be subscribed to the
+            // Instagram user's webhook events. Subscribe to messages here
+            // so a successful connection is immediately ready to receive DMs.
+            const subscribeRes = await fetch(
+              `https://graph.instagram.com/${META_VERSION}/${encodeURIComponent(igId)}/subscribed_apps`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({
+                  subscribed_fields: 'messages',
+                  access_token: token,
+                }).toString(),
+              },
+            );
+            const subscribeData = await subscribeRes.json().catch(() => ({}));
+
+            if (!subscribeRes.ok || subscribeData?.error) {
+              const subscribeMessage =
+                subscribeData?.error?.message ||
+                subscribeData?.error?.error_user_msg ||
+                `HTTP ${subscribeRes.status}`;
+              message = `Instagram account verified, but webhook subscription failed: ${subscribeMessage}`;
+              success = false;
+            } else {
+              success = true;
+              message = 'Instagram connection verified and messaging webhook subscribed successfully.';
+            }
           } else {
             const graphMessage =
               igData?.error?.message ||
