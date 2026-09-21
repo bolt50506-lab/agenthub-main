@@ -29,6 +29,7 @@ const NAV_ITEMS = [
   { href: '/dashboard/orders', label: 'Orders & Bookings', icon: ShoppingCart },
   { href: '/dashboard/payments', label: 'Customer Payments', icon: CreditCard },
   { href: '/dashboard/billing', label: 'My Billing & Receipts', icon: ReceiptText },
+  { href: '/dashboard/payment-verification', label: 'Payment Verification', icon: Shield },
   { href: '/dashboard/follow-ups', label: 'Follow-ups', icon: CheckSquare },
   { href: '/dashboard/follow-up-automation', label: 'Follow-up Automation', icon: Zap },
   { href: '/dashboard/knowledge', label: 'Knowledge Base', icon: BookOpen },
