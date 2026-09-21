@@ -51,6 +51,48 @@ export async function POST(req: NextRequest) {
 
         if (!id) {
           message = 'Missing required ID field.';
+        } else if (type === 'instagram') {
+          // Instagram accounts connected to a Facebook Page can be accessed
+          // through different Meta token types. A direct GET on the IG user
+          // may fail with "Unsupported get request" even when the token is
+          // valid. Try the direct IG object first, then verify the
+          // Page -> Instagram relationship through /me/accounts.
+          const igId = String(config.instagram_account_id);
+          const directUrl = `https://graph.facebook.com/${META_VERSION}/${encodeURIComponent(igId)}?fields=id,username`;
+          const directRes = await fetch(directUrl, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+
+          if (directRes.ok) {
+            const directData = await directRes.json().catch(() => ({}));
+            success = String(directData?.id || '') === igId;
+            message = success
+              ? 'Instagram connection verified successfully.'
+              : 'Instagram account ID could not be verified.';
+          } else {
+            const accountsUrl = `https://graph.facebook.com/${META_VERSION}/me/accounts?fields=id,name,instagram_business_account{id,username}`;
+            const accountsRes = await fetch(accountsUrl, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            const accountsData = await accountsRes.json().catch(() => ({}));
+            const pages = Array.isArray(accountsData?.data) ? accountsData.data : [];
+            const matchedPage = pages.find((page: any) =>
+              String(page?.instagram_business_account?.id || '') === igId
+            );
+
+            if (matchedPage) {
+              success = true;
+              message = 'Instagram connection verified through the connected Facebook Page.';
+              // Store the Page ID so the integration can use the same Page-linked
+              // credential consistently for future Meta operations.
+              const mergedConfig = { ...config, page_id: String(matchedPage.id) };
+              await supabase.from('integrations').update({ config: mergedConfig }).eq('id', integrationId);
+            } else {
+              const directBody = await directRes.text().catch(() => '');
+              const graphError = accountsData?.error?.message || directBody || `HTTP ${directRes.status}`;
+              message = `API error: ${graphError}`;
+            }
+          }
         } else {
           const url = `https://graph.facebook.com/${META_VERSION}/${id}`;
           const res = await fetch(url, {
