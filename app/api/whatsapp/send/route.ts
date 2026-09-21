@@ -48,7 +48,8 @@ export async function POST(req: NextRequest) {
     const phoneNumberId = String(integrationConfig.phone_number_id || '');
     const useCloud = Boolean(cloudToken && phoneNumberId);
     const { data: session } = useCloud ? { data: null } : await supabase.from('whatsapp_sessions').select('session_id, status').eq('business_id', business_id).eq('connection_method', 'qr_code').eq('status', 'connected').order('updated_at', { ascending: false }).limit(1).maybeSingle();
-    const qrSessionId = session?.session_id || '';\n    if (!useCloud && !qrSessionId) return NextResponse.json({ success: false, error: 'No connected WhatsApp Cloud API or QR session was found' }, { status: 409 });
+    const qrSessionId = session?.session_id || '';
+    if (!useCloud && !qrSessionId) return NextResponse.json({ success: false, error: 'No connected WhatsApp Cloud API or QR session was found' }, { status: 409 });
 
     // Claim the conversation for the human BEFORE sending the outbound message.
     // This closes the race where a customer message arriving during the send
