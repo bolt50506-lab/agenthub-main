@@ -33,6 +33,7 @@ export default function AppointmentsPage() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [services, setServices] = useState<Array<{ id: string; name: string; price: number | null; currency: string; advance_required: number }>>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [ioOpen, setIoOpen] = useState(false);
@@ -41,10 +42,16 @@ export default function AppointmentsPage() {
 
   const fetchAppointments = async () => {
     if (!activeBusiness) return;
+    setLoadError(null);
     const [aptRes, serviceRes] = await Promise.all([
       supabase.from('appointments').select('*').eq('business_id', activeBusiness.id).order('date', { ascending: true }),
       supabase.from('services').select('id,name,price,currency,advance_required').eq('business_id', activeBusiness.id).eq('status','active').order('name'),
     ]);
+    const firstError = aptRes.error || serviceRes.error;
+    if (firstError) {
+      console.error('[Appointments] Load failed:', firstError.message);
+      setLoadError(firstError.message);
+    }
     setAppointments(aptRes.data as Appointment[] ?? []);
     setServices(serviceRes.data ?? []);
     setLoading(false);
@@ -64,6 +71,10 @@ export default function AppointmentsPage() {
       });
     }
     setSubmitting(false);
+    if (error) {
+      toast({ title: 'Appointment could not be created', description: error.message, variant: 'destructive' });
+      return;
+    }
     setCreateOpen(false);
     setForm({ customer_name: '', service_id: '', service_name: '', service_price: '', currency: 'PKR', advance_required: '0', date: '', start_time: '09:00', end_time: '09:30', notes: '' });
     await fetchAppointments();
@@ -86,6 +97,7 @@ export default function AppointmentsPage() {
 
   return (
     <div className="space-y-6">
+      {loadError && <Card className="border-destructive/30 bg-destructive/5"><CardContent className="py-3 text-sm text-destructive">Appointments could not be fully loaded: {loadError}.</CardContent></Card>}
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">{appointments.length} appointment{appointments.length !== 1 ? 's' : ''}</p>
         <div className="flex items-center gap-2">
