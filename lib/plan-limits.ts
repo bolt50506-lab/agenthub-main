@@ -74,7 +74,11 @@ export function isSubscriptionSuspended(status: string | null | undefined): bool
 }
 
 export function isSubscriptionExpired(status: string | null | undefined): boolean {
-  return status === 'expired';
+  return status === 'expired' || status === 'overdue';
+}
+
+export function isSubscriptionOverdue(status: string | null | undefined): boolean {
+  return status === 'overdue';
 }
 
 export function isSubscriptionCancelled(status: string | null | undefined): boolean {
@@ -86,7 +90,9 @@ export function getSubscriptionBlockedMessage(status: string | null | undefined)
     return 'Your business account has been suspended. Please contact the platform administrator.';
   }
   if (isSubscriptionExpired(status)) {
-    return 'Your subscription has expired. Please contact the platform administrator.';
+    return status === 'overdue'
+      ? 'Your subscription payment is overdue. Your 10-day grace period is active; renew before it ends to keep access.'
+      : 'Your subscription has expired. Please renew to restore access.';
   }
   if (isSubscriptionCancelled(status)) {
     return 'Your subscription has been cancelled. Please contact the platform administrator.';
