@@ -15,6 +15,15 @@ const CORS = {
 const MAX_TEXT = 1800;
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
 const SIGNED_URL_SECONDS = 10 * 60;
+async function hasActiveSubscription(supabase: any, businessId: string) {
+  const { data: business } = await supabase.from('businesses').select('is_platform_business').eq('id', businessId).maybeSingle();
+  if (business?.is_platform_business) return true;
+  const { data: sub } = await supabase.from('business_subscriptions').select('status,end_date,overdue_grace_ends_at').eq('business_id', businessId).order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (!sub) return false;
+  const now = Date.now();
+  return ((sub.status === 'active' || sub.status === 'trial') && (!sub.end_date || new Date(sub.end_date).getTime() > now))
+    || (sub.status === 'overdue' && sub.overdue_grace_ends_at && new Date(sub.overdue_grace_ends_at).getTime() > now);
+}
 
 function wantsUrdu(language: string, text: string) {
   const value = `${language} ${text}`.toLowerCase();
@@ -38,6 +47,7 @@ export async function POST(req: NextRequest) {
   if (!businessId || !text) return NextResponse.json({ error: 'business_id and text are required' }, { status: 400, headers: CORS });
 
   const supabase = createServiceClient();
+  if (!(await hasActiveSubscription(supabase, businessId))) return NextResponse.json({ error: 'Subscription inactive or expired' }, { status: 402, headers: CORS });
   const { data: integration } = await supabase
     .from('integrations')
     .select('status')
