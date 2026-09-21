@@ -26,6 +26,7 @@ export default function ConversationsPage() {
   const [sending, setSending] = useState(false);
   const [modeChanging, setModeChanging] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const messageScrollRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
@@ -33,29 +34,33 @@ export default function ConversationsPage() {
 
   const loadConversations = useCallback(async () => {
     if (!activeBusiness) return;
-    const { data: convData } = await supabase
+    setLoadError(null);
+    const { data: convData, error: convError } = await supabase
       .from('conversations')
       .select('*')
       .eq('business_id', activeBusiness.id)
       .order('last_message_at', { ascending: false, nullsFirst: false })
       .order('created_at', { ascending: false });
 
+    if (convError) { setLoadError(convError.message); setConversations([]); setLoading(false); return; }
     const rows = (convData as Conversation[]) ?? [];
     const customerIds = Array.from(new Set(rows.map((c) => c.customer_id).filter((id): id is string => Boolean(id))));
     let customerMap = new Map<string, Customer>();
     if (customerIds.length) {
-      const { data: customers } = await supabase.from('customers').select('*').in('id', customerIds);
+      const { data: customers, error: customerError } = await supabase.from('customers').select('*').in('id', customerIds);
+      if (customerError) console.warn('[Conversations] Customer lookup failed:', customerError.message);
       customerMap = new Map(((customers as Customer[]) ?? []).map((customer) => [customer.id, customer]));
     }
 
     const latestPreview = new Map<string, string>();
     if (rows.length) {
-      const { data: allMessages } = await supabase
+      const { data: allMessages, error: previewError } = await supabase
         .from('messages')
         .select('conversation_id, content, created_at')
         .eq('business_id', activeBusiness.id)
         .order('created_at', { ascending: false })
         .limit(200);
+      if (previewError) console.warn('[Conversations] Preview lookup failed:', previewError.message);
       for (const message of allMessages ?? []) {
         if (!latestPreview.has(message.conversation_id)) latestPreview.set(message.conversation_id, message.content);
       }
@@ -78,6 +83,11 @@ export default function ConversationsPage() {
   }, []);
 
   useEffect(() => { setLoading(true); loadConversations(); }, [loadConversations]);
+  useEffect(() => {
+    if (!activeBusiness) return;
+    const timer = window.setInterval(() => { void loadConversations(); if (activeConversationRef.current) void loadMessages(activeConversationRef.current); }, 15000);
+    return () => window.clearInterval(timer);
+  }, [activeBusiness, loadConversations, loadMessages]);
   useEffect(() => { if (!selectedId) { setMessages([]); return; } activeConversationRef.current = selectedId; shouldStickToBottomRef.current = true; setMobileDetailOpen(true); loadMessages(selectedId); }, [selectedId, loadMessages]);
 
   useEffect(() => {
@@ -234,6 +244,8 @@ export default function ConversationsPage() {
         </div>
         <Button variant="outline" size="sm" onClick={() => { loadConversations(); if (selectedId) loadMessages(selectedId); }}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
       </div>
+
+      {loadError && <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">Conversation inbox could not load: {loadError}. Use Refresh after your session is restored.</div>}
 
       <div className="grid min-h-0 grid-cols-1 gap-4 xl:h-[calc(100vh-11rem)] xl:grid-cols-[380px_minmax(0,1fr)]">
         <Card className={`flex min-h-[420px] flex-col overflow-hidden xl:min-h-0 ${mobileDetailOpen ? 'hidden md:flex' : 'flex'}`}>
