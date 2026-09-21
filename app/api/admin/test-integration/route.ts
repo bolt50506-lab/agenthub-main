@@ -3,6 +3,8 @@ import { createServiceClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
+const META_VERSION = process.env.META_GRAPH_API_VERSION || 'v23.0';
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -50,7 +52,7 @@ export async function POST(req: NextRequest) {
         if (!id) {
           message = 'Missing required ID field.';
         } else {
-          const url = `https://graph.facebook.com/v18.0/${id}`;
+          const url = `https://graph.facebook.com/${META_VERSION}/${id}`;
           const res = await fetch(url, {
             headers: { Authorization: `Bearer ${token}` },
           });
