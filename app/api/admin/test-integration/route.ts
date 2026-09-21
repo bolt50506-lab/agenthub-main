@@ -52,12 +52,12 @@ export async function POST(req: NextRequest) {
         if (!id) {
           message = 'Missing required ID field.';
         } else if (type === 'instagram') {
-          // Instagram accounts connected to a Facebook Page can be accessed
-          // through different Meta token types. A direct GET on the IG user
-          // may fail with "Unsupported get request" even when the token is
-          // valid. Try the direct IG object first, then verify the
-          // Page -> Instagram relationship through /me/accounts.
+          // Support both Meta authentication paths used for Page-connected
+          // Instagram accounts: direct Instagram tokens and Facebook
+          // user/Page tokens. Do not treat a valid Page token as an
+          // Instagram-user token, which causes "Unsupported get request".
           const igId = String(config.instagram_account_id);
+
           const directUrl = `https://graph.facebook.com/${META_VERSION}/${encodeURIComponent(igId)}?fields=id,username`;
           const directRes = await fetch(directUrl, {
             headers: { Authorization: `Bearer ${token}` },
@@ -70,30 +70,61 @@ export async function POST(req: NextRequest) {
               ? 'Instagram connection verified successfully.'
               : 'Instagram account ID could not be verified.';
           } else {
-            const accountsUrl = `https://graph.facebook.com/${META_VERSION}/me/accounts?fields=id,name,instagram_business_account{id,username}`;
-            const accountsRes = await fetch(accountsUrl, {
+            // First determine what object the supplied token represents.
+            const meRes = await fetch(`https://graph.facebook.com/${META_VERSION}/me?fields=id,name`, {
               headers: { Authorization: `Bearer ${token}` },
             });
-            const accountsData = await accountsRes.json().catch(() => ({}));
-            const pages = Array.isArray(accountsData?.data) ? accountsData.data : [];
-            const matchedPage = pages.find((page: any) =>
-              String(page?.instagram_business_account?.id || '') === igId
-            );
+            const meData = await meRes.json().catch(() => ({}));
+            const meId = String(meData?.id || '');
 
-            if (matchedPage) {
-              success = true;
-              message = 'Instagram connection verified through the connected Facebook Page.';
-              // Store the Page ID so the integration can use the same Page-linked
-              // credential consistently for future Meta operations.
-              const mergedConfig = { ...config, page_id: String(matchedPage.id) };
-              await supabase.from('integrations').update({ config: mergedConfig }).eq('id', integrationId);
-            } else {
-              const directBody = await directRes.text().catch(() => '');
-              const graphError = accountsData?.error?.message || directBody || `HTTP ${directRes.status}`;
-              message = `API error: ${graphError}`;
+            // A Page access token resolves /me to the Page. Check the
+            // Page-linked Instagram Business Account directly.
+            if (meId) {
+              const pageRes = await fetch(
+                `https://graph.facebook.com/${META_VERSION}/${encodeURIComponent(meId)}?fields=id,name,instagram_business_account{id,username}`,
+                { headers: { Authorization: `Bearer ${token}` } },
+              );
+              const pageData = await pageRes.json().catch(() => ({}));
+              const pageIgId = String(pageData?.instagram_business_account?.id || '');
+
+              if (pageIgId === igId) {
+                success = true;
+                message = 'Instagram connection verified through the connected Facebook Page.';
+                const mergedConfig = { ...config, page_id: meId, page_access_token: token };
+                await supabase.from('integrations').update({ config: mergedConfig }).eq('id', integrationId);
+              }
+            }
+
+            // A Facebook user token resolves /me to the user. Discover the
+            // Pages they manage and their linked Instagram account.
+            if (!success) {
+              const accountsUrl = `https://graph.facebook.com/${META_VERSION}/me/accounts?fields=id,name,access_token,instagram_business_account{id,username}`;
+              const accountsRes = await fetch(accountsUrl, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              const accountsData = await accountsRes.json().catch(() => ({}));
+              const pages = Array.isArray(accountsData?.data) ? accountsData.data : [];
+              const matchedPage = pages.find((page: any) =>
+                String(page?.instagram_business_account?.id || '') === igId
+              );
+
+              if (matchedPage) {
+                success = true;
+                message = 'Instagram connection verified through the connected Facebook Page.';
+                const mergedConfig = {
+                  ...config,
+                  page_id: String(matchedPage.id),
+                  page_access_token: String(matchedPage.access_token || token),
+                };
+                await supabase.from('integrations').update({ config: mergedConfig }).eq('id', integrationId);
+              } else {
+                const directBody = await directRes.text().catch(() => '');
+                const graphError = accountsData?.error?.message || pageData?.error?.message || meData?.error?.message || directBody || `HTTP ${directRes.status}`;
+                message = `API error: ${graphError}`;
+              }
             }
           }
-        } else {
+        }        } else {
           const url = `https://graph.facebook.com/${META_VERSION}/${id}`;
           const res = await fetch(url, {
             headers: { Authorization: `Bearer ${token}` },
