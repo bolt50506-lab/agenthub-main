@@ -49,7 +49,7 @@ export default function LeadsPage() {
   const fetchLeads = async () => {
     if (!activeBusiness) return;
     setLoadError(null);
-    let query = supabase.from('leads').select('*').eq('business_id', activeBusiness.id).order('created_at', { ascending: false });
+    let query = supabase.from('leads').select('*').eq('business_id', activeBusiness.id).order('lead_score', { ascending: false }).order('created_at', { ascending: false });
     if (statusFilter !== 'all') query = query.eq('status', statusFilter);
     if (search) {
       query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%,email.ilike.%${search}%`);
@@ -186,8 +186,8 @@ export default function LeadsPage() {
             <TableBody>
               {leads.map((lead) => {
                 const statusInfo = LEAD_STATUSES.find((s) => s.value === lead.status);
-                const score = getLeadScore(lead);
-                const heat = score >= 80 ? 'Hot' : score >= 60 ? 'Warm' : 'Cold';
+                const score = Number(lead.lead_score ?? 20);
+                const heat = lead.lead_temperature ? lead.lead_temperature.charAt(0).toUpperCase() + lead.lead_temperature.slice(1) : (score >= 80 ? 'Hot' : score >= 60 ? 'Warm' : 'Cold');
                 return (
                   <TableRow key={lead.id} className="cursor-pointer" onClick={() => window.location.href = `/dashboard/leads/${lead.id}`}>
                     <TableCell className="font-medium">{lead.name}</TableCell>
