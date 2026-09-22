@@ -59,6 +59,9 @@ lead_temperature = case
   end
 end;
 
+update public.leads
+set lead_temperature = case when lead_score >= 80 then 'hot' when lead_score >= 60 then 'warm' else 'cold' end;
+
 create index if not exists idx_leads_business_score on public.leads(business_id, lead_score desc, created_at desc);
 create unique index if not exists uq_automated_followup_number_per_lead
   on public.follow_up_tasks(lead_id, followup_number)
