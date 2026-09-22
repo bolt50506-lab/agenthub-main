@@ -316,6 +316,8 @@ export interface Lead {
   location: string | null;
   requirement: string | null;
   status: LeadStatus;
+  lead_score: number;
+  lead_temperature: 'hot' | 'warm' | 'cold';
   assigned_to: string | null;
   conversation_summary: string | null;
   converted_at: string | null;
