@@ -94,6 +94,95 @@ export async function POST(req: NextRequest) {
           await supabase.from('notifications').insert({ business_id: businessId, user_id: ctx.user.id, type: 'operator_action', title: 'Payment reminder prepared', message: `Payment reminder prepared for ${order.customer_name || 'customer'}; no linked lead is available for automatic WhatsApp delivery.`, metadata: { order_id: order.id, balance_due: order.balance_due } });
           result = { queued: false, prepared: true };
         }
+      } else if (action.action_type === 'recover_conversation' || action.action_type === 'follow_up_stale_lead' || action.action_type === 'create_lead_followup' || action.action_type === 'review_quiet_conversation' || action.action_type === 'review_overdue_task') {
+        const payload = action.payload && typeof action.payload === 'object' ? action.payload : {};
+        const leadId = String(payload.lead_id || action.entity_id || '').trim();
+        let lead: any = null;
+
+        if (leadId) {
+          const { data } = await supabase.from('leads')
+            .select('id,business_id,phone,name,conversation_id,status')
+            .eq('id', leadId).eq('business_id', businessId).maybeSingle();
+          lead = data;
+        }
+
+        if (!lead && payload.conversation_id) {
+          const { data: conversation } = await supabase.from('conversations')
+            .select('id,customer_id,channel,status,human_takeover')
+            .eq('id', String(payload.conversation_id)).eq('business_id', businessId).maybeSingle();
+          if (conversation?.customer_id) {
+            const { data } = await supabase.from('leads')
+              .select('id,business_id,phone,name,conversation_id,status')
+              .eq('business_id', businessId).eq('conversation_id', conversation.id).maybeSingle();
+            lead = data;
+          }
+        }
+
+        if (!lead) throw new Error('Lead for this Operator action no longer exists');
+        if (!lead.phone) throw new Error('Lead has no WhatsApp phone number');
+        if (['won','lost'].includes(String(lead.status))) {
+          result = { skipped: true, reason: 'lead_closed' };
+        } else {
+          const { data: existing } = await supabase.from('follow_up_tasks')
+            .select('id').eq('business_id', businessId).eq('lead_id', lead.id)
+            .in('status',['pending','processing']).limit(1).maybeSingle();
+          if (existing) {
+            result = { already_queued: true, task_id: existing.id };
+          } else {
+            const notes = String(
+              payload.message ||
+              action.description ||
+              `Hi ${lead.name || ''}! Just checking in to see if you still need any help. 😊`
+            ).trim();
+            const { data: task, error } = await supabase.from('follow_up_tasks').insert({
+              business_id: businessId,
+              lead_id: lead.id,
+              conversation_id: lead.conversation_id || null,
+              task_type: 'follow_up',
+              scheduled_at: new Date().toISOString(),
+              status: 'pending',
+              notes,
+              channel: 'whatsapp',
+              automation_generated: true,
+              followup_number: 1,
+            }).select('id').single();
+            if (error) throw new Error(error.message);
+            result = { task_id: task.id, queued: true, message: notes };
+          }
+        }
+      } else if (action.action_type === 'payment_recovery' || action.action_type === 'prepare_payment_reminder') {
+        const orderId = String(action.entity_id || action.payload?.order_id || '').trim();
+        if (!orderId) throw new Error('Order id is missing');
+        const { data: order } = await supabase.from('public_checkout_orders')
+          .select('id,lead_id,customer_name,status,amount_cents')
+          .eq('id', orderId).eq('business_id', businessId).maybeSingle();
+        if (!order) throw new Error('Checkout order no longer exists');
+        if (['paid','completed','cancelled'].includes(String(order.status))) {
+          result = { skipped: true, reason: 'order_closed' };
+        } else if (!order.lead_id) {
+          result = { skipped: true, reason: 'order_has_no_lead' };
+        } else {
+          const { data: lead } = await supabase.from('leads')
+            .select('id,phone,name,conversation_id,status')
+            .eq('id', order.lead_id).eq('business_id', businessId).maybeSingle();
+          if (!lead) throw new Error('Linked lead no longer exists');
+          if (!lead.phone) throw new Error('Linked lead has no WhatsApp phone number');
+          const { data: existing } = await supabase.from('follow_up_tasks')
+            .select('id').eq('business_id',businessId).eq('lead_id',lead.id)
+            .in('status',['pending','processing']).limit(1).maybeSingle();
+          if (existing) {
+            result = { already_queued: true, task_id: existing.id };
+          } else {
+            const notes = `Hi ${lead.name || ''}! Just a friendly reminder regarding your pending order. Please let us know if you need any help.`.trim();
+            const { data: task, error } = await supabase.from('follow_up_tasks').insert({
+              business_id: businessId, lead_id: lead.id, conversation_id: lead.conversation_id || null,
+              task_type:'payment_recovery', scheduled_at:new Date().toISOString(), status:'pending',
+              notes, channel:'whatsapp', automation_generated:true, followup_number:1
+            }).select('id').single();
+            if (error) throw new Error(error.message);
+            result = { task_id: task.id, queued: true, message: notes };
+          }
+        }
       } else if (action.action_type === 'inventory_alert') {
         await supabase.from('notifications').insert({ business_id: businessId, user_id: ctx.user.id, type: 'operator_inventory', title: action.title, message: action.description || 'Inventory needs review.', metadata: action.payload || {} });
         result = { notified: true };
