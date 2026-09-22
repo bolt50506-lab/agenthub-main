@@ -27,24 +27,53 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ error: 'Verification failed' }, { status: 403, headers: CORS });
 }
 
+async function debugLog(supabase: ReturnType<typeof createServiceClient>, stage: string, detail: Record<string, unknown>, phoneNumberId?: string | null, integrationFound?: boolean, businessId?: string | null) {
+  try {
+    const { error } = await supabase.from('whatsapp_webhook_debug').insert({
+      stage, phone_number_id: phoneNumberId ?? null, integration_found: integrationFound ?? null,
+      business_id: businessId ?? null, detail,
+    });
+    if (error) console.error('[WhatsApp Webhook Debug] insert failed:', JSON.stringify(error));
+  } catch (e) { console.error('[WhatsApp Webhook Debug] insert threw:', String(e)); }
+}
+
 export async function POST(req: NextRequest) {
   const requestStartedAt = Date.now();
   const stage = (name: string, startedAt: number) => console.log(`[WhatsApp AI Timing] ${name}: ${Date.now() - startedAt}ms`);
-  const body = await req.json() as { entry?: Array<{ changes?: Array<{ value?: { messaging_product?: string; metadata?: { phone_number_id?: string }; messages?: Array<{ from?: string; id?: string; text?: { body?: string }; type?: string }>; contacts?: Array<{ wa_id?: string; profile?: { name?: string } }> } }> }> };
   const supabase = createServiceClient();
+
+  let body: { entry?: Array<{ changes?: Array<{ value?: { messaging_product?: string; metadata?: { phone_number_id?: string }; messages?: Array<{ from?: string; id?: string; text?: { body?: string }; type?: string }>; contacts?: Array<{ wa_id?: string; profile?: { name?: string } }> } }> }> };
+  try {
+    body = await req.json();
+  } catch (e) {
+    await debugLog(supabase, 'invalid_json', { error: String(e) });
+    return NextResponse.json({ status: 'invalid_json' }, { headers: CORS });
+  }
+
   const databaseStartedAt = Date.now();
   const entry = body.entry?.[0];
   const change = entry?.changes?.[0];
   const value = change?.value;
   const message = value?.messages?.[0];
   const contact = value?.contacts?.[0];
-  if (!message || !value?.metadata?.phone_number_id) return NextResponse.json({ status: 'no_message' }, { headers: CORS });
+  if (!message || !value?.metadata?.phone_number_id) {
+    await debugLog(supabase, 'no_message', { rawKeys: Object.keys(body || {}), entryCount: body.entry?.length ?? 0, hasChanges: !!change, hasValue: !!value, valueKeys: value ? Object.keys(value) : [] });
+    return NextResponse.json({ status: 'no_message' }, { headers: CORS });
+  }
 
   const phoneNumberId = value.metadata.phone_number_id;
-  const { data: integration } = await supabase.from('integrations').select('id, business_id, config').eq('type', 'whatsapp').eq('status', 'connected').maybeSingle();
-  if (!integration || !integration.business_id) return NextResponse.json({ status: 'no_integration' }, { headers: CORS });
+  const { data: integration, error: integrationError } = await supabase.from('integrations').select('id, business_id, config').eq('type', 'whatsapp').eq('status', 'connected').maybeSingle();
+  if (integrationError) await debugLog(supabase, 'integration_query_error', { error: integrationError.message }, phoneNumberId, false);
+  if (!integration || !integration.business_id) {
+    await debugLog(supabase, 'no_integration', {}, phoneNumberId, false);
+    return NextResponse.json({ status: 'no_integration' }, { headers: CORS });
+  }
   const config = integration.config as Record<string, unknown>;
-  if (config.phone_number_id !== phoneNumberId) return NextResponse.json({ status: 'phone_mismatch' }, { headers: CORS });
+  if (config.phone_number_id !== phoneNumberId) {
+    await debugLog(supabase, 'phone_mismatch', { configPhoneNumberId: config.phone_number_id }, phoneNumberId, true, integration.business_id);
+    return NextResponse.json({ status: 'phone_mismatch' }, { headers: CORS });
+  }
+  await debugLog(supabase, 'matched_integration', { messageId: message.id, from: message.from, hasText: !!message.text?.body }, phoneNumberId, true, integration.business_id);
 
   const businessId = integration.business_id;
   const senderPhone = message.from ?? '';
@@ -79,7 +108,11 @@ export async function POST(req: NextRequest) {
   if (!conversationId) return NextResponse.json({ status: 'no_conversation' }, { headers: CORS });
   stage('customer_and_conversation_setup', databaseStartedAt);
 
-  await supabase.from('messages').insert({ business_id: businessId, conversation_id: conversationId, sender_type: 'customer', content: textBody, content_type: 'text', is_inbound: true, metadata: { channel: 'whatsapp_cloud_api', whatsapp_message_id: whatsappMessageId } });
+  const { error: inboundInsertError } = await supabase.from('messages').insert({ business_id: businessId, conversation_id: conversationId, sender_type: 'customer', content: textBody, content_type: 'text', is_inbound: true, metadata: { channel: 'whatsapp_cloud_api', whatsapp_message_id: whatsappMessageId } });
+  if (inboundInsertError) {
+    console.error('[WhatsApp Webhook] Inbound message insert failed:', JSON.stringify(inboundInsertError));
+    await debugLog(supabase, 'inbound_insert_failed', { error: inboundInsertError.message, conversationId }, phoneNumberId, true, businessId);
+  }
 
   if (!conversationAiEnabled) {
     await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversationId);
@@ -98,8 +131,6 @@ export async function POST(req: NextRequest) {
   const { data: aiStateBeforeGeneration } = await supabase.from('conversations').select('ai_enabled').eq('id', conversationId).maybeSingle();
   if (aiStateBeforeGeneration?.ai_enabled === false) return NextResponse.json({ status: 'human_mode', conversationId, ai_enabled: false }, { headers: CORS });
 
-  // Appointment intent is handled deterministically before the general LLM so real slots are checked first.
-  // This also carries the selected date/time through a simple confirmation turn such as "yes" or "book it".
   try {
     const appointmentReply = await appointmentConversationReply(supabase, businessId, customerId, conversationId, textBody);
     if (appointmentReply) {
