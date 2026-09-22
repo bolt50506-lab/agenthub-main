@@ -3,6 +3,8 @@ import { createServerClient, createServiceClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
 
+// Operator executor supports Business Analyzer action types; keep this route on the latest production deployment.
+
 async function getContext() {
   const auth = await createServerClient();
   const { data: { user }, error } = await auth.auth.getUser();
